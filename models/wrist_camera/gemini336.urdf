@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<!-- V1 mount and camera are aligned using mounting holes and CAD faces.
+     This nominal alignment must be verified on the physical arm. -->
+<robot name="b601_gemini336">
+  <link name="gripper_end"/>
+  <link name="camera_mount_link">
+    <visual><origin xyz="0.0002 -0.04472 0.03452" rpy="0 0 0"/><geometry><mesh filename="meshes/D435_Gemini2_Mount_V1.stl" scale="0.001 0.001 0.001"/></geometry><material name="mount"><color rgba="0.035 0.035 0.04 1"/></material></visual>
+  </link>
+  <joint name="gripper_to_mount" type="fixed"><parent link="gripper_end"/><child link="camera_mount_link"/><origin rpy="1.5827 0.0024 1.5515" xyz="-0.1201 0.0003 0.0450"/></joint>
+  <link name="camera_link">
+    <visual><origin xyz="-0.01587 -0.025 -0.0125" rpy="0 0 0"/><geometry><mesh filename="meshes/gemini336_camera_link.STL"/></geometry><material name="camera"><color rgba="0.14 0.16 0.17 1"/></material></visual>
+  </link>
+  <joint name="mount_to_camera" type="fixed"><parent link="camera_mount_link"/><child link="camera_link"/><origin rpy="0.00521505 -1.31199913 -1.57274705" xyz="0.0251 0.01004655 0.04546314"/></joint>
+  <link name="camera_color_frame"/>
+  <joint name="camera_color_joint" type="fixed"><parent link="camera_link"/><child link="camera_color_frame"/><origin rpy="0 0 0" xyz="0.0019099999917671084 -0.01400499977171421 4.999999873689376e-06"/></joint>
+  <link name="camera_color_optical_frame"/>
+  <joint name="camera_color_optical_joint" type="fixed"><parent link="camera_color_frame"/><child link="camera_color_optical_frame"/><origin rpy="-1.5707963267949 0 -1.5707963267949" xyz="0 0 0"/></joint>
+</robot>

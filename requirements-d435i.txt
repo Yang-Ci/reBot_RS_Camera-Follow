@@ -1,0 +1,11 @@
+# D435i 纯视觉环境；机械臂控制还需要 requirements.txt 中相应依赖及源码。
+pyrealsense2>=2.54
+mediapipe==0.10.14
+opencv-contrib-python>=4.8,<5
+numpy>=1.24,<2
+PyYAML>=6.0
+pynput>=1.7
+
+# MediaPipe 0.10.14 与 NumPy 1.x 的兼容组合，避免 pip 回溯最新 JAX。
+jax==0.4.38
+jaxlib==0.4.38

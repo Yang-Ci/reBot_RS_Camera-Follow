@@ -1,0 +1,15 @@
+pinch:
+  closed_px: 20.0
+  open_px: 200.0
+  filter_type: one_euro
+  smoothing: 0.35
+  min_cutoff_hz: 2.0
+  beta: 0.01
+  dcutoff_hz: 1.0
+  deadband_deg: 2.0
+gripper:
+  enabled: true
+  hold_while_moving: true
+  move_speed_threshold: 0.05
+  closed_deg: 5.2
+  open_deg: 285.2

@@ -1,0 +1,15 @@
+# Gemini 336 覆盖项；其余值继承 follow.yaml，速度及工作空间保持原配置。
+# 优先抑制停手后锁存反复退出；需要重新进行实机验证。
+follow:
+  kf_r_xy: 0.004
+  kf_lead_ms: 7.0
+  kf_lead_max_ms: 14.0
+  kf_ff_deadband_off: 0.08
+  kf_ff_deadband_on: 0.15
+  kf_fast_start_dist: 0.04
+  # 锁存后停止姿态修正和速度尾迹；降低相机自运动带来的前馈放大。
+  stationary_joint_hold: true
+  kf_fast_start_enable: false
+  vel_feedforward: 0.5
+  # 目标 20Hz；同步读取超过 10ms 时自动降至 1Hz，实际频率需实机验证。
+  diag_actual_feedback_hz: 20.0
