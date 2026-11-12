@@ -8,6 +8,7 @@ import sys
 import types
 import tempfile
 import unittest
+from unittest import mock
 
 import numpy as np
 
@@ -393,15 +394,11 @@ class ActualFeedbackTests(unittest.TestCase):
         self.assertIsNone(feedback_age_ms(None, 10.2, 1.0))
 
     def test_slow_high_frequency_read_falls_back(self):
-        import time
-        robot = self.Robot()
-        original = robot.get_current_pos
-        def slow_read():
-            time.sleep(0.015)
-            return original()
-        robot.get_current_pos = slow_read
-        sampler = ActualFeedbackSampler(robot, hz=20)
-        self.assertTrue(sampler.sample_once())
+        sampler = ActualFeedbackSampler(self.Robot(), hz=20)
+        # Simulate a 15 ms read without relying on the host scheduler's sleep precision.
+        with mock.patch('robot_follow.runtime.diagnostics.time.monotonic',
+                        side_effect=[10.0, 10.015]):
+            self.assertTrue(sampler.sample_once())
         self.assertEqual(sampler.snapshot()['rate_hz'], 1.0)
         self.assertEqual(sampler.period_s, 1.0)
 

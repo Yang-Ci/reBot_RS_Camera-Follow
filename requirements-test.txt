@@ -1,0 +1,5 @@
+# Hardware-free regression dependencies (Python 3.10+).
+numpy>=1.24,<2
+scipy>=1.10,<2
+opencv-contrib-python-headless==4.10.0.84
+PyYAML>=6,<7

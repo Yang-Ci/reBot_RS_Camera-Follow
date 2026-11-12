@@ -1,0 +1,26 @@
+name: Offline regression
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-fake-hardware:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install offline test dependencies
+        run: python -m pip install -r requirements-test.txt
+      - name: Run sequential fake-device and Linux signal checks
+        run: python tools/run_regression.py --extended

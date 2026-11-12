@@ -92,6 +92,9 @@ class FakeBridge:
     def __init__(self, *args, **kwargs):
         pass
 
+    def reset(self):
+        pass
+
     def update(self, image, det):
         return (*det, "det") if det is not None else (None, None, None)
 

@@ -17,8 +17,38 @@
 手掌移动 → 机械臂跟随（保持固定距离与姿态）；拇指食指捏合 → 夹爪开合。
 
 > 日常调参只改 `config/follow.yaml`（跟随）和 `config/grasp.yaml`（夹爪）两个文件；
-> 命令行参数临时覆盖。完整的技术原理与踩坑记录见 [技术手册.md](技术手册.md)。
+> 命令行参数临时覆盖。完整的技术原理与踩坑记录见 [技术手册](docs/技术手册.md)。
 
+## 技术路线
+
+系统采用腕部深度相机和视觉伺服：一次手部检测同时驱动掌心跟随与捏合抓取，机械臂和夹爪通过同一控制器下发指令。
+
+```text
+RGB / 深度相机 → 图像与深度对齐 → MediaPipe 手部关键点
+                                      ├→ 掌心深度采样 → 三维目标 → 滤波与预测
+                                      │                          ↓
+                                      │    坐标变换 → 位置/姿态控制 → 雅可比逆解
+                                      │                          ↓
+                                      │       工作空间与关节约束 → CAN → 机械臂
+                                      └→ 拇指、食指距离 → 滤波与映射 → 夹爪
+
+本地网页 → 管理控制程序、预览相机、显示关节状态和三维模型
+```
+
+1. **感知**：Gemini 2、Gemini 336 或 RealSense D435i 提供图像与对齐深度；MediaPipe 提取手部关键点，掌心深度用于恢复三维位置，捏合距离用于控制夹爪。
+2. **标定与坐标变换**：使用相机内参、手眼关系和机械臂运动学，将相机观测转换到控制所需的坐标系；不同设备与安装应使用匹配的标定结果。
+3. **跟随控制**：视觉线程更新目标，伺服线程按设定的 10 ms 周期执行滤波、速度前馈、位置和姿态控制、阻尼雅可比逆解及关节指令下发。实际频率和延迟以诊断数据为准。
+4. **稳定与保护**：深度有效性和跳变检查、目标丢失保持、工作空间约束、奇异位形阻尼以及速度和加速度限制共同约束运动；夹爪使用独立滤波和状态门控。
+5. **监控与验证**：本地网页管理控制子进程，通过本机实时通道接收状态并显示相机与机械臂模型；通道不可用时可回退日志。相机重连时会核对可用的设备序列号、图像流和内参，拒绝不匹配的设备。离线工具用于标定、诊断和日志分析。网页模型可能使用低频反馈、指令或估算值，具体来源以页面标记为准。
+
+原项目曾进行实机测试；本次结构重构已完成离线回归，尚需在实际相机与机械臂上重新验证。测试结论依赖具体硬件、安装、标定和配置。更换这些条件后应重新验证。工作空间约束不等同于整机碰撞检测，网页退出也不能替代硬件急停。
+
+## 阅读导航
+
+- 首次运行：下方的相机章节和[快速开始](#快速开始)。
+- 日常调参：[配置文件与参数优先级](#配置文件与参数优先级)及跟随、夹爪调参章节。
+- 网页操作：[网页说明](web/README.md)；相机安装模型：[模型说明](models/wrist_camera/README.md)。
+- 原理和排障：[技术手册](docs/技术手册.md)；历史基准：[定稿技术文档](docs/B601手掌跟随系统_定稿技术文档.md)。历史文档中的参数应以当前配置和 README 为准。
 ## 只有 D435i：先运行纯视觉模式
 
 已增加 Intel RealSense D435i 的 RGB + 对齐深度支持，**不需要 Gemini 2 或机械臂**。
@@ -27,7 +57,7 @@ RealSense 的 IMU 暂未使用。默认以 640×480、30 fps 启动；有 RGB �
 红外转为三通道输入检测模型，识别效果取决于实际画面，需现场验证。连接 USB 3 后：
 
 ```bash
-cd /home/robot/Rebot_B601_RS_CV_Control
+# 在项目根目录执行
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements-d435i.txt
 .venv/bin/python palm_follow_grasp.py --camera d435i --no-arm --detector-backend cpu
@@ -110,7 +140,7 @@ Gemini 336 采用 `--camera gemini336`，纯视觉预览：
 
 默认使用 URDF 名义位姿；也可显式指定 `--gemini336-pose calibration` 使用与当前安装匹配的独立实测手眼结果；程序将验证 `config/hand_eye_calibration_gemini336.json` 的设备信息。相机内参仍由相机 SDK 提供。默认叠加 `config/follow_gemini336.yaml`，原有速度、工作空间和夹爪配置不变。
 
-本地只读监视页面：
+本地监视与控制页面：
 
 ```bash
 python3 web/server.py
@@ -163,9 +193,9 @@ ip -details link show can0
 相机固定于末端、标记固定在桌面且不可移动。`Q` / `Esc` 可能不能立即打断等待中的运动，
 请准备硬件急停；退出会触发机械臂回零。标定质量合格并确认零位、HOME 和检测可靠后才做实机跟随。
 
-## 最终版本 v10.0（CV-only）
+## v10.0 控制策略（CV-only）
 
-这版是实机验收后的最终版本，只保留恒速 CV 卡尔曼模型，不再包含 Singer。
+该策略来自原项目的实机验收版本，只保留恒速 CV 卡尔曼模型，不再包含 Singer。本次重构后的实机行为仍需重新验证。
 
 ### 最终控制行为
 
@@ -298,7 +328,7 @@ python3 tools/analyze_servo_log.py logs/servo_时间.csv --json
    取自同一个 HandLandmarker 结果，不增加检测开销。
 
 3. **安全约束全部保留并叠加**
-   跟随侧：虚拟软墙/硬墙、可操作度奇异保护、丢手保持、Esc 急停、
+   跟随侧：虚拟软墙/硬墙、可操作度奇异保护、丢手保持、Esc 请求退出、
    退出时「缓慢回零→到位→失能」（防止自由下落）；
    夹爪侧：启动时以电机当前角为平滑起点（不猛动）、映射两端截断、
    One Euro 滤波防抖 + 死区、适配层角度硬限幅（-100° ~ +400°）兜底。
@@ -307,14 +337,25 @@ python3 tools/analyze_servo_log.py logs/servo_时间.csv --json
 
 ```
 rebot_palm_follow_grasp/
-├── palm_follow_grasp.py           ★ 主程序（跟随 + 夹爪，一个脚本）
+├── palm_follow_grasp.py           ★ 启动入口与设备装配
 ├── palm_follow_fixed_orientation.py   仅跟随版（原跟踪主程序，保留作对照调试）
 │
-├── gemini2_camera.py              相机层（Orbbec SDK，RGB+深度硬件对齐）
-├── palm_detection.py              检测层（掌心跟踪 + 捏合距离，共用一次检测）
+├── gemini2_camera.py              Orbbec 相机接口
+├── realsense_camera.py            RealSense 相机接口
+├── robot_follow/                  新的分层代码包（逐步迁移中）
+│   ├── configuration/           跟随配置、夹爪配置和参数校验
+│   ├── control/                 伺服循环、目标滤波、时序、夹爪与保护
+│   ├── hardware/                相机会话、设备接口和硬件运动学
+│   ├── perception/              手部检测与帧处理、深度保护和相机校验
+│   ├── presentation/           本地画面和控制诊断显示
+│   └── runtime/                 视觉循环、HOME、诊断、资源生命周期和实时状态
+├── tests/                         独立模块回归测试
+├── kalman_target.py               目标滤波旧导入路径（兼容入口）
+├── urdf_camera_pose.py            URDF 相机位姿解析
+├── palm_detection.py              手部检测旧导入路径（兼容入口）
 ├── rebot_adapter.py               机械臂适配层（速度伺服 + FK/雅可比 + J7 夹爪通道）
-├── servo_timing.py                时间校准/分轴Q/静止保持/速度停靠/lead/慢拖/软墙
-├── servo_diagnostics.py           低阻塞 CSV + 可选低频实际反馈采样
+├── servo_timing.py                时序与控制辅助旧导入路径（兼容入口）
+├── servo_diagnostics.py           诊断旧导入路径（兼容入口）
 │
 ├── config/                        所有配置与标定产物
 │   ├── follow.yaml                ★ 最终版 CV 跟随参数（日常调参改这里）
@@ -343,9 +384,14 @@ rebot_palm_follow_grasp/
 │   └── offline_smoke_test.py      假相机/假机械臂完整主程序冒烟测试
 │
 ├── requirements.txt
-├── 技术手册.md                     项目全部技术与技巧汇总（感知/标定/控制/稳定性/安全）
+├── web/                           本地网页、控制进程与遥测解析
+├── models/                        相机与支架模型
+├── docs/                          技术手册与历史定稿文档
+├── requirements-d435i.txt         D435i 纯视觉依赖
 └── README.md
 ```
+
+核心离线回归：先安装 `python -m pip install -r requirements-test.txt`，再运行 `python tools/run_regression.py`。它在独立进程中依次运行模块、伺服和假硬件流程，避免并发测试互相使用诊断日志；`--list` 可查看项目；`--extended` 额外运行假设备自动标定和浏览器手势逻辑测试，需要 SciPy 和 Node.js。网页进程和信号相关的三项检查只在 Linux 运行，其他平台会标为跳过。ROS 等专项工具仍需按各自环境单独运行。仓库的 Linux GitHub Actions 使用同一扩展回归入口；其结果以实际运行记录为准。以上检查不连接真实机械臂。
 
 ## 快速开始
 
@@ -464,6 +510,8 @@ python3 palm_follow_grasp.py --follow-cfg my.yaml   # 换一份配置文件
 
 ## 调参：夹爪（config/grasp.yaml）
 
+启动前会校验配置：数值必须有限，`open_px` 须大于 `closed_px`，夹爪开合角差至少 5°；平滑系数须在 0～1，死区、运动阈值和滤波 beta 不得为负，滤波截止频率必须为正。校验失败时不会打开相机或使能机械臂。
+
 | 参数 | 含义 | 建议 |
 | --- | --- | --- |
 | `pinch.closed_px` / `open_px` | 捏合/张开时两指尖像素距离 | 手离相机远则整体调小，按实测改 |
@@ -546,7 +594,7 @@ python3 palm_follow_grasp.py --follow-cfg my.yaml   # 换一份配置文件
 - [ ] CAN 已配置（1 Mbps）、电机温度正常
 - [ ] 三轴虚拟墙已按实际桌面修改；`workspace.max_radius` 不超过 0.42m
 - [ ] 首次/改参后：`--no-arm` → `--no-follow` → `--no-gripper` 低速 → 完整模式
-- [ ] Esc 急停有效（rebot_control 内置，触发平滑回零）
+- [ ] Esc 请求退出及回零流程有效；硬件急停可用
 - [ ] 工作半径内无人；**眼睛看机械臂，不看屏幕**
 - [ ] ⚠️ 任何退出路径都必须走完「保持→缓慢回零→到位→失能」，
       严禁在非零位直接失能电机（屈肘姿态失能 = 自由下落，有真实事故教训）

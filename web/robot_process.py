@@ -9,6 +9,8 @@ import time
 import json
 from pathlib import Path
 
+from live_telemetry import LiveTelemetryReceiver
+
 
 class RobotProcess:
     def __init__(self, project):
@@ -25,6 +27,7 @@ class RobotProcess:
         self.preview_process = None
         self.preview_serial = None
         self.camera_lock = None
+        self.telemetry = None
 
     def cameras(self):
         python = self.project / '.venv-arm/bin/python'
@@ -112,6 +115,9 @@ class RobotProcess:
                     except OSError:
                         pass
             self._unlock_camera()
+        if not running and self.telemetry is not None:
+            self.telemetry.close()
+            self.telemetry = None
         if not running and self.lock_file is not None:
             fcntl.flock(self.lock_file.fileno(), fcntl.LOCK_UN)
             self.lock_file.close()
@@ -177,6 +183,10 @@ class RobotProcess:
                 self._unlock_camera()
                 raise RuntimeError('已有控制程序或网页会话，不能重复占用 CAN')
             token = secrets.token_hex(12)
+            try:
+                self.telemetry = LiveTelemetryReceiver(token)
+            except OSError:
+                self.telemetry = None  # CSV telemetry remains available.
             self.ready_path = logs / f'.web_ready_{token}'
             self.preview_path = logs / f'.web_preview_{token}.jpg'
             self.log_path = logs / f'web_controller_{time.strftime("%Y%m%d_%H%M%S")}_{token[:6]}.log'
@@ -188,8 +198,13 @@ class RobotProcess:
             if speed == 'slow':
                 args += ['--gain', '1.5', '--gain-x', '1.5', '--max-vel', '0.10', '--home-speed', '4']
             env = os.environ.copy()
+            env.pop('REBOT_TELEMETRY_PORT', None)
+            env.pop('REBOT_TELEMETRY_TOKEN', None)
             env['REBOT_WEB_READY_PATH'] = str(self.ready_path)
             env['REBOT_WEB_PREVIEW_PATH'] = str(self.preview_path)
+            if self.telemetry is not None:
+                env['REBOT_TELEMETRY_PORT'] = str(self.telemetry.port)
+                env['REBOT_TELEMETRY_TOKEN'] = token
             if self.preview_serial:
                 env['REBOT_CAMERA_SERIAL'] = self.preview_serial
             try:
@@ -200,6 +215,9 @@ class RobotProcess:
                                                     stdin=subprocess.DEVNULL, stdout=output,
                                                     stderr=subprocess.STDOUT, start_new_session=True)
             except BaseException:
+                if self.telemetry is not None:
+                    self.telemetry.close()
+                    self.telemetry = None
                 fcntl.flock(self.lock_file.fileno(), fcntl.LOCK_UN)
                 self.lock_file.close()
                 self.lock_file = None
@@ -207,6 +225,12 @@ class RobotProcess:
                 raise
             self.stopping = False
             return {'ok': True, 'message': '正在移动到 HOME；通过到位检查后将自动跟随'}
+
+    def live_telemetry(self):
+        with self.lock:
+            if not self._running() or self.telemetry is None:
+                return None
+            return self.telemetry.latest()
 
     def camera_frame(self):
         with self.lock:

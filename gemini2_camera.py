@@ -139,8 +139,18 @@ class Gemini2Camera:
             config.set_align_mode(OBAlignMode.HW_MODE)
             self.pipeline.enable_frame_sync()
 
-        self.pipeline.start(config)
+        try:
+            self.pipeline.start(config)
+            self._finish_initialization(color_exposure_ms)
+        except BaseException:
+            # Construction failed after streaming began; do not leave the device occupied.
+            try:
+                self.pipeline.stop()
+            except Exception:
+                pass
+            raise
 
+    def _finish_initialization(self, color_exposure_ms):
         # ---- 读取 RGB 相机内参（对齐后统一用 RGB 内参做反投影和标定）----
         camera_param = self.pipeline.get_camera_param()
         intr = camera_param.rgb_intrinsic   # 对齐模式下用 rgb_intrinsic
@@ -160,7 +170,6 @@ class Gemini2Camera:
                                          distortion.p1, distortion.p2,
                                          distortion.k3], dtype=np.float32)
             if not np.all(np.isfinite(self.dist_coeffs)):
-                self.pipeline.stop()
                 raise ValueError("Gemini 336 彩色镜头畸变参数无效")
         else:
             self.dist_coeffs = np.zeros(5, dtype=np.float32)
@@ -233,7 +242,7 @@ class Gemini2Camera:
                               f"画面变暗属正常现象")
                         ok = True
                         break
-                    print(f"[Gemini2]   → 亮度不足基准 40%，单位假设错误，换下一档")
+                    print("[Gemini2]   → 亮度不足基准 40%，单位假设错误，换下一档")
                 if not ok:
                     device.set_bool_property(
                         OBPropertyID.OB_PROP_COLOR_AUTO_EXPOSURE_BOOL, True)

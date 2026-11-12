@@ -9,3 +9,4 @@ output/
 config/*_candidate_*.json
 config/*_samples_*.npz
 config/hand_eye_calibration_d435i.json
+.venv-refactor/

@@ -24,7 +24,8 @@ class RealSenseCamera:
         if not devices:
             raise RuntimeError("未发现 RealSense 相机，请检查 USB 连接和设备权限")
         device = devices[0]
-        config.enable_device(device.get_info(rs.camera_info.serial_number))
+        self.camera_serial = device.get_info(rs.camera_info.serial_number)
+        config.enable_device(self.camera_serial)
         self.has_color = any(
             p.stream_type() == rs.stream.color
             for sensor in device.query_sensors() for p in sensor.get_stream_profiles())
@@ -37,9 +38,15 @@ class RealSenseCamera:
             print("[RealSense] 没有 RGB 传感器，使用左红外画面；手部识别效果需实测")
         try:
             profile = self.pipeline.start(config)
-        except RuntimeError as exc:
-            raise RuntimeError(f"D435i 启动失败（{width}x{height}@{fps}）：{exc}。"
-                               "请检查 USB 连接、权限和流配置；可尝试 --fps 30") from exc
+        except BaseException as exc:
+            try:
+                self.pipeline.stop()
+            except Exception:
+                pass
+            if isinstance(exc, RuntimeError):
+                raise RuntimeError(f"D435i 启动失败（{width}x{height}@{fps}）：{exc}。"
+                                   "请检查 USB 连接、权限和流配置；可尝试 --fps 30") from exc
+            raise
         try:
             device = profile.get_device()
             if not self.has_color and ir_emitter == "off":
@@ -80,9 +87,15 @@ class RealSenseCamera:
                 sensor.set_option(rs.option.exposure, color_exposure_ms * 1000.0)
             print(f"[D435i] {self.width}x{self.height}@{fps}，深度单位={self.depth_scale:.6f}m，"
                   f"fx={self.fx:.2f} fy={self.fy:.2f}")
-        except Exception:
-            self._restore_emitter()
-            self.pipeline.stop()
+        except BaseException:
+            try:
+                self._restore_emitter()
+            except Exception:
+                pass
+            try:
+                self.pipeline.stop()
+            except Exception:
+                pass
             raise
 
     def get_frames(self, latest_only=True):

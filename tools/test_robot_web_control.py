@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import socket
 import sys
 import tempfile
 import unittest
@@ -59,6 +60,8 @@ class RobotProcessTests(unittest.TestCase):
         self.assertIn('--web-auto-follow', process.args)
         self.assertEqual(process.args[process.args.index('--home-j34-tolerance') + 1], '3.5')
         self.assertEqual(process.kwargs['env']['REBOT_WEB_PREVIEW_PATH'], str(self.robot.preview_path))
+        self.assertEqual(process.kwargs['env']['REBOT_TELEMETRY_PORT'], str(self.robot.telemetry.port))
+        self.assertEqual(process.kwargs['env']['REBOT_TELEMETRY_TOKEN'], self.robot.telemetry.token)
         self.assertIsNone(self.robot.camera_frame())
         self.robot.preview_path.write_bytes(b'jpeg')
         self.assertEqual(self.robot.camera_frame(), b'jpeg')
@@ -79,6 +82,7 @@ class RobotProcessTests(unittest.TestCase):
         with self.assertRaises(RuntimeError): self.robot.follow(True)
         process.returncode = 0
         self.assertFalse(self.robot.status()['running'])
+        self.assertIsNone(self.robot.telemetry)
         self.assertFalse(self.robot.preview_path.exists())
 
     def test_guard_options_external_controller_and_duplicate_start(self):
@@ -104,6 +108,23 @@ class RobotProcessTests(unittest.TestCase):
             second.start()
         second.process.returncode = 0
         second.status()
+
+    def test_live_telemetry_is_bound_to_running_session(self):
+        self.robot.start()
+        token, port = self.robot.telemetry.token, self.robot.telemetry.port
+        packet = {'token': token, 'row': {'host_time': str(time.monotonic())}}
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sender:
+            sender.sendto(json.dumps(packet).encode(), ('127.0.0.1', port))
+        deadline = time.monotonic() + 1.0
+        sample = None
+        while sample is None and time.monotonic() < deadline:
+            sample = self.robot.live_telemetry()
+            if sample is None:
+                time.sleep(.01)
+        self.assertIsNotNone(sample)
+        self.robot.process.returncode = 0
+        self.assertIsNone(self.robot.live_telemetry())
+        self.assertIsNone(self.robot.telemetry)
 
     def test_shutdown_during_startup_never_force_kills(self):
         self.robot.start()

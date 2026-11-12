@@ -171,6 +171,14 @@ CTRL_DT = 0.02   # 仅作 dt 钳制参照；实际积分用墙上时钟，主循
 # ─────────────────────────────────────────────────────────────
 # 底层 IO：所有与 rebot_control SDK 相关的调用只出现在这个类里
 # ─────────────────────────────────────────────────────────────
+def _stop_after_failed_start(stop):
+    """Attempt safe shutdown while preserving both startup and stop failures."""
+    try:
+        stop()
+    except Exception as exc:
+        raise RuntimeError(f'初始化失败后回零失能也失败: {exc}') from exc
+
+
 class _ArmIO:
     def __init__(self):
         # rebot_control 是源码仓库（无 pip 包），真实包名为 rebot，
@@ -186,10 +194,15 @@ class _ArmIO:
         # 竞争（二次 Ctrl+C 半途失能电机、相机管道被二次关闭）。
         # 退出统一由 palm_follow_grasp 的 q/Esc/Ctrl+C 路径处理，
         # 最终同样调用本类的 stop()（回零→保持→失能），安全性不变。
-        self.arm.start(enable_esc=False)        # start 内部自动 connect
-        # 安全速度包络（度/秒）；第 7 项为夹爪
-        self.arm.set_max_speeds(np.rad2deg(MAX_JOINT_SPEED).tolist()
-                                + [GRIPPER_SPEED_DEG_S])
+        try:
+            self.arm.start(enable_esc=False)        # start 内部自动 connect
+            # 安全速度包络（度/秒）；第 7 项为夹爪
+            self.arm.set_max_speeds(np.rad2deg(MAX_JOINT_SPEED).tolist()
+                                    + [GRIPPER_SPEED_DEG_S])
+        except BaseException:
+            # start 可能已经连接或使能，初始化失败也走同一回零失能路径。
+            _stop_after_failed_start(self.stop)
+            raise
         # 夹爪（J7）目标角：初始化时读一次实际角度作为初始目标（防止使能瞬间
         # 夹爪猛动），之后由 set_gripper_deg() 更新。
         # 同步 CAN 读（read_joint_angles 是阻塞式 CAN 往返，官方建议 ≤30Hz）
@@ -215,10 +228,7 @@ class _ArmIO:
         wait=True 同样不可省略：shutdown 是守护线程，不等它跑完主线程退出时，
         解释器会把「失能电机/关闭 CAN」杀在半路上。
         """
-        try:
-            self.arm.stop(return_to_zero=True, wait=True)
-        except Exception:
-            pass
+        self.arm.stop(return_to_zero=True, wait=True)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -247,9 +257,13 @@ class RebotAdapter:
         self.io = _ArmIO()
 
         # 速度伺服的状态：当前位置目标（初始 = 当前实际位置，防止使能瞬间跳动）
-        q_now = self.get_current_pos()
-        self._q_target = q_now.copy()
-        self._last_cmd_time = time.time()
+        try:
+            q_now = self.get_current_pos()
+            self._q_target = q_now.copy()
+            self._last_cmd_time = time.time()
+        except BaseException:
+            _stop_after_failed_start(self.io.stop)
+            raise
 
     # ── 状态读取 ─────────────────────────────────────────────
     def get_current_pos(self):
@@ -419,6 +433,11 @@ class RebotAdapter:
             q_full[self.model.joints[jid].idx_q] = \
                 joint_positions[i] + JOINT_OFFSET[i]
         return q_full
+
+    def tcp_pose_and_jacobian(self, joint_positions, tool_offset):
+        """Return TCP pose and world-aligned Jacobian for the requested joints."""
+        from robot_follow.hardware.kinematics import tcp_pose_and_jacobian
+        return tcp_pose_and_jacobian(self, joint_positions, tool_offset)
 
     def forward_kinematics(self):
         """对应 Panthera.forward_kinematics() → {'position','rotation'}"""
