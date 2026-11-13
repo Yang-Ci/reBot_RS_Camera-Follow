@@ -45,7 +45,7 @@ class LivePipelineTests(unittest.TestCase):
             except BaseException as exc:
                 errors.append(exc)
 
-        args = ['palm_follow_grasp.py', '--headless', '--web-control', '--web-auto-follow']
+        args = ['palm_follow_grasp.py', '--headless', '--web-control']
         with mock.patch.dict(os.environ, env), mock.patch.object(sys, 'argv', args), \
              mock.patch.object(module.signal, 'signal', return_value=None), \
              mock.patch.object(module.signal, 'SIGUSR1', 1001, create=True), \
@@ -56,7 +56,7 @@ class LivePipelineTests(unittest.TestCase):
             deadline = time.monotonic() + 10
             while thread.is_alive() and time.monotonic() < deadline:
                 sample = receiver.latest()
-                if sample and sample[0].get('following') == '1':
+                if sample and sample[0].get('following') == '0':
                     break
                 time.sleep(.02)
             thread.join(timeout=10)
@@ -64,7 +64,7 @@ class LivePipelineTests(unittest.TestCase):
         self.assertFalse(errors, errors)
         self.assertIsNotNone(sample, 'controller did not publish live telemetry')
         row, age = sample
-        self.assertEqual(row['following'], '1')
+        self.assertEqual(row['following'], '0')
         self.assertTrue(state_from_row(ROOT, row, age)['online'])
         self.assertTrue(namespace['FakeRobot'].instances[-1].stopped)
 

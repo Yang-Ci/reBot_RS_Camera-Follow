@@ -15,6 +15,8 @@ from robot_follow.runtime.observation import TargetObservation
 from robot_follow.control.gripper import GripperMapper
 from robot_follow.hardware.camera import CameraSession
 from robot_follow.perception.pipeline import HandPipeline
+from robot_follow.perception.depth_diagnostics import DepthDiagnostics
+from robot_follow.perception.start_gesture import is_open_palm
 
 
 @dataclass(frozen=True)
@@ -52,9 +54,11 @@ class VisionContext:
     robot: Any
     run_control: RunControl
     timestamp_calibrator: Any
-    toggle_tracking: Callable
+    pause_tracking: Callable
     web_shutdown_requested: list[bool]
     one_euro_filter: Callable
+    startup_gate: Any = None
+    request_start: Callable | None = None
 
 
 def run_vision(context: VisionContext):
@@ -70,6 +74,7 @@ def run_vision(context: VisionContext):
     ms_det = 0.0    # 手掌识别耗时 EMA (ms)
     camera_timestamp_warned = False
     last_debug_at = 0.0
+    depth_diagnostics = DepthDiagnostics(time.monotonic())
     try:
         last_frame_time = time.time()
         while not context.run_control.quit_requested.is_set() and not context.web_shutdown_requested[0]:
@@ -92,6 +97,11 @@ def run_vision(context: VisionContext):
                 raw_timestamp_s, frame_arrival_time)
             _t1 = time.perf_counter()
             if color_image is None:
+                summary = depth_diagnostics.record(None, frame_arrival_time, no_frame=True)
+                if summary:
+                    print(summary, flush=True)
+                if context.startup_gate is not None:
+                    context.startup_gate.reset()
                 # 取流失败也属于观测丢失：让伺服进入有界 coast→保持流程，
                 # 不能把最后一次 visible=True 永久留在共享状态中。
                 with context.lock:
@@ -115,7 +125,7 @@ def run_vision(context: VisionContext):
             last_frame_time = time.time()
             if context.preview_writer is not None:
                 try:
-                    context.preview_writer.submit(color_image)
+                    context.preview_writer.submit(color_image, depth_raw, depth_scale)
                 except Exception as exc:
                     print(f'[网页相机] 预览帧不可用: {exc}', flush=True)
                     context.preview_writer.close()
@@ -130,6 +140,9 @@ def run_vision(context: VisionContext):
 
             hand_frame = context.hand_pipeline.process(color_image, depth_raw, depth_scale)
             track, landmarks = hand_frame.track, hand_frame.landmarks
+            summary = depth_diagnostics.record(track, time.monotonic())
+            if summary:
+                print(summary, flush=True)
             ms_grab = 0.9 * ms_grab + 0.1 * (_t1 - _t0) * 1000
             ms_det = 0.9 * ms_det + 0.1 * (hand_frame.detection_finished - _t1) * 1000
 
@@ -139,6 +152,17 @@ def run_vision(context: VisionContext):
                                     arrived_at=frame_arrival_time,
                                     published_at=target_publish_time,
                                     hardware_time=frame_hw_time)
+
+            if context.startup_gate is not None and context.request_start is not None:
+                with context.lock:
+                    eligible = (context.run_control.gesture_start_allowed
+                                and not context.run_control.following
+                                and context.observation.visible
+                                and not context.observation.frozen)
+                opened = is_open_palm(landmarks, color_image.shape[1], color_image.shape[0])
+                if context.startup_gate.update(frame_obs_time, eligible=eligible, opened=opened):
+                    print('[跟随] 张开手掌已保持 3 秒，请求启动', flush=True)
+                    context.request_start()
 
             # ── 捏合 → 夹爪（与跟随共用同一次检测结果）──
             # 新鲜度门控（log19 修复 + log21 修正）：
@@ -150,7 +174,9 @@ def run_vision(context: VisionContext):
             pinch_fresh = (track is not None and track['lost'] == 0)
             pinch_pts = None
             with context.lock:
-                gripper_allowed = not context.options.web_control or context.run_control.following
+                gripper_allowed = (not context.run_control.servo_failed
+                                   and (not context.options.follow_enabled
+                                        or context.run_control.following))
             if (context.options.gripper_enabled and landmarks is not None
                     and pinch_fresh and gripper_allowed):
                 pinch_px, p1, p2 = context.pinch_distance_px(landmarks, color_image.shape)
@@ -196,8 +222,14 @@ def run_vision(context: VisionContext):
                     following=following, status=status, fps=fps))
                 if key == ord('q'):
                     context.run_control.quit_requested.set()
+                if key in (ord('r'), ord('R')) and context.request_start is not None:
+                    # Explicit start is allowed again after a safety pause.
+                    with context.lock:
+                        context.run_control.following = (context.options.follow_enabled
+                                                         and not context.run_control.servo_failed)
+                        context.run_control.gesture_start_allowed = False
                 if key in (ord('g'), ord(' ')):
-                    context.toggle_tracking()
+                    context.pause_tracking()
             else:
                 time.sleep(0.005)   # headless：让出 CPU，等待键盘事件
 

@@ -15,7 +15,7 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'web'))
-from robot_process import RobotProcess
+from robot_process import RobotProcess, speed_presets, validate_motion_settings
 
 
 class FakeProcess:
@@ -57,7 +57,7 @@ class RobotProcessTests(unittest.TestCase):
         self.robot.start()
         process = self.robot.process
         self.assertIn('--web-control', process.args)
-        self.assertIn('--web-auto-follow', process.args)
+        self.assertNotIn('--web-auto-follow', process.args)
         self.assertEqual(process.args[process.args.index('--home-j34-tolerance') + 1], '3.5')
         self.assertEqual(process.kwargs['env']['REBOT_WEB_PREVIEW_PATH'], str(self.robot.preview_path))
         self.assertEqual(process.kwargs['env']['REBOT_TELEMETRY_PORT'], str(self.robot.telemetry.port))
@@ -84,6 +84,48 @@ class RobotProcessTests(unittest.TestCase):
         self.assertFalse(self.robot.status()['running'])
         self.assertIsNone(self.robot.telemetry)
         self.assertFalse(self.robot.preview_path.exists())
+
+    def test_medium_sets_gain_speed_and_safe_home_speed(self):
+        self.robot.start('medium', False)
+        args = self.robot.process.args
+        for flag, value in (('--gain', '1.9'), ('--gain-x', '1.9'),
+                            ('--max-vel', '0.25'), ('--home-speed', '4')):
+            self.assertEqual(args[args.index(flag) + 1], value)
+        self.assertIn('--keep-gripper-position', args)
+
+    def test_custom_motion_is_applied_and_cannot_be_changed_while_running(self):
+        motion = {'gain': 1.8, 'gain_x': 1.7, 'max_vel': .2}
+        self.robot.start('medium', False, motion=motion)
+        args = self.robot.process.args
+        for flag, value in (('--gain', '1.8'), ('--gain-x', '1.7'),
+                            ('--max-vel', '0.2'), ('--home-speed', '4')):
+            self.assertEqual(args[args.index(flag) + 1], value)
+        self.assertEqual(self.robot.status()['motion_settings'], motion)
+        with self.assertRaises(RuntimeError):
+            self.robot.start('medium', False, motion=motion)
+
+    def test_invalid_custom_motion_never_starts_process(self):
+        valid = {'gain': 1.9, 'gain_x': 1.9, 'max_vel': .25}
+        invalid = [None, {}, {'gain': 1, 'gain_x': 1},
+                   {**valid, 'gain': float('nan')}, {**valid, 'gain_x': float('inf')},
+                   {**valid, 'gain': True}, {**valid, 'gain_x': 2.51},
+                   {**valid, 'max_vel': 0}, {**valid, 'max_vel': .71},
+                   {**valid, 'max_vel': '0.25'}, {**valid, 'extra': 1}]
+        for motion in invalid:
+            with self.subTest(motion=motion), self.assertRaises(ValueError):
+                validate_motion_settings(motion)
+        with self.assertRaises(ValueError):
+            self.robot.start('medium', False, motion={**valid, 'max_vel': .71})
+        self.assertIsNone(self.robot.process)
+
+    def test_presets_follow_camera_profile_without_changing_them(self):
+        config = self.project / 'config'
+        config.mkdir()
+        (config / 'follow.yaml').write_text('follow:\n  gain: 2.35\n  gain_x: 2.4\n  max_vel: 0.7\n')
+        (config / 'follow_gemini336.yaml').write_text('follow:\n  gain: 2.1\n')
+        presets = speed_presets(self.project)
+        self.assertEqual(presets['configured'], {'gain': 2.1, 'gain_x': 2.4, 'max_vel': .7})
+        self.assertEqual(presets['medium'], {'gain': 1.9, 'gain_x': 1.9, 'max_vel': .25})
 
     def test_guard_options_external_controller_and_duplicate_start(self):
         with self.assertRaises(ValueError): self.robot.start('invalid', False)
@@ -152,7 +194,7 @@ class HttpSecurityTests(unittest.TestCase):
         cls.web = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(cls.web)
 
-    def request(self, origin, host='127.0.0.1:8765', body=b'{}', content_type='application/json'):
+    def request(self, origin, host='127.0.0.1:8765', body=b'{"confirm_home":true}', content_type='application/json'):
         from email.message import Message
         handler = object.__new__(self.web.Handler)
         handler.headers = Message()
@@ -175,6 +217,20 @@ class HttpSecurityTests(unittest.TestCase):
             start.assert_not_called()
             self.assertEqual(self.request('http://127.0.0.1:8765')[0], 200)
             start.assert_called_once_with('slow', False)
+
+    def test_motion_validation_before_start(self):
+        with mock.patch.object(self.web.controller, 'start', return_value={'ok': True}) as start:
+            for confirmation in (None, False, 1, 'true'):
+                body = json.dumps({'confirm_home': confirmation}).encode()
+                self.assertEqual(self.request('http://127.0.0.1:8765', body=body)[0], 400)
+            for motion in (None, {}, {'gain': 1.9, 'gain_x': 1.9, 'max_vel': .71},
+                           {'gain': True, 'gain_x': 1.9, 'max_vel': .25}):
+                body = json.dumps({'confirm_home': True, 'motion': motion}).encode()
+                self.assertEqual(self.request('http://127.0.0.1:8765', body=body)[0], 400)
+            start.assert_not_called()
+            body = json.dumps({'confirm_home': True, 'speed': 'medium', 'motion': {'gain': 1.9, 'gain_x': 1.9, 'max_vel': .25}}).encode()
+            self.assertEqual(self.request('http://127.0.0.1:8765', body=body)[0], 200)
+            self.assertEqual(start.call_args.kwargs['motion']['max_vel'], .25)
 
     def test_camera_endpoint_returns_only_current_frame(self):
         handler = object.__new__(self.web.Handler)

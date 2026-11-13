@@ -24,14 +24,12 @@ import cv2
 import mediapipe as mp
 from mediapipe.tasks import python as mp_python
 from mediapipe.tasks.python import vision as mp_vision
+from robot_follow.perception.depth_sampling import (DEPTH_PATCH, MAX_DEPTH_M,
+                                                    MIN_DEPTH_M, get_median_depth)
 
 # ── 配置 ──────────────────────────────────────────────────
 PALM_LANDMARK_ID = 9        # 中指根部，作为掌心代表点
 PINCH_TIP_IDS = (4, 8)      # 捏合手势：拇指尖(4)—食指尖(8)，用于夹爪开合控制
-MIN_DEPTH_M = 0.15          # Gemini 2 近距极限，小于此值的深度丢弃
-MAX_DEPTH_M = 1.50          # 跟随场景用不到太远
-DEPTH_PATCH = 3             # 深度采样半窗口（实际 7x7）
-
 MAX_LOST_FRAMES = 8         # 与原项目一致：丢失 8 帧内保持上一帧
 SMOOTH_ALPHA = 0.4          # 指数平滑系数（越小越平滑）
 NUM_HANDS = 1               # 只跟一只手，避免左右手跳变
@@ -274,27 +272,6 @@ class PalmTracker:
                     self.track = None
 
         return self.track
-
-
-def get_median_depth(depth_raw, depth_scale, u, v, patch=DEPTH_PATCH):
-    """
-    在 (u,v) 邻域取中值深度（米）。
-    depth_raw: uint16 深度图（已对齐到彩色）
-    无效/超量程返回 0.0
-
-    BS 高帧率模式下掌心小窗口常出现深度空洞（实测表现为 palm 可见
-    但 z3d=0，手臂顿挫）：采样窗口逐级扩大 patch → 2x → 3x，
-    只有最大窗口仍无效才放弃本帧。
-    """
-    h, w = depth_raw.shape
-    for p in (patch, patch * 2, patch * 3):
-        x0, x1 = max(0, u - p), min(w, u + p + 1)
-        y0, y1 = max(0, v - p), min(h, v + p + 1)
-        window = depth_raw[y0:y1, x0:x1].astype(np.float32) * depth_scale
-        valid = window[(window >= MIN_DEPTH_M) & (window <= MAX_DEPTH_M)]
-        if valid.size >= 5:     # 有效点太少说明在边缘/遮挡处，不可信
-            return float(np.median(valid))
-    return 0.0
 
 
 def pixel_to_3d(u, v, depth_m, fx, fy, cx, cy):

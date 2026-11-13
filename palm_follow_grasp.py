@@ -24,9 +24,10 @@
     python palm_follow_grasp.py --headless       # 无窗口模式（SSH 场景，q 键退出）
 
 操作：
-    g / 空格 : 启动/停止跟随（--no-follow 时无效）
+    R        : 请求开始跟随（--no-follow 时无效）
+    g / 空格 : 暂停跟随
     q        : 退出（停止并保持 → 缓慢回零 → 失能）
-    Esc      : rebot_control 内置急停（平滑回零）
+    Esc      : 请求退出并回零，不是硬件急停
 
 ⚠️ 首次运行前：
     1. 夹爪开合标定：tools/gripper_j7_calibrate.py（结果写入 config/grasp.yaml）
@@ -70,7 +71,8 @@ from robot_follow.control.guards import (pause_outside_workspace, pause_runtime_
 from robot_follow.runtime.observation import TargetObservation
 from robot_follow.runtime.control import RunControl
 from robot_follow.runtime.home import HomeOptions, initialize_home
-from robot_follow.runtime.telemetry import LiveTelemetryPublisher
+from robot_follow.runtime.telemetry import LiveTelemetryPublisher, PhaseTelemetry
+from robot_follow.perception.start_gesture import OpenPalmStartGate
 from robot_follow.runtime.resources import RuntimeResources
 from robot_follow.runtime.vision import VisionContext, VisionOptions, run_vision
 from robot_follow.control.components import ServoComponents
@@ -161,14 +163,16 @@ def main():
 def _run(resources):
     args = parse_args()
     resources.web_control = args.web_control
-    if args.web_auto_follow and not args.web_control:
-        raise ValueError('--web-auto-follow 需要 --web-control')
+    if args.web_auto_follow:
+        raise ValueError('--web-auto-follow 已停用：HOME 后请按 R 或张开手掌 3 秒')
     web_shutdown_requested = [False]
+    def request_web_shutdown(_sig, _frame):
+        web_shutdown_requested[0] = True
     if args.web_control:
         # During HOME initialization defer shutdown until the normal cleanup
         # path is established; interrupting a move before it exists is unsafe.
         resources.original_sigint_handler = signal.signal(
-            signal.SIGINT, lambda _sig, _frame: web_shutdown_requested.__setitem__(0, True))
+            signal.SIGINT, request_web_shutdown)
     if args.gemini2_urdf_pose and args.camera != 'gemini336':
         raise ValueError('--gemini2-urdf-pose 仅适用于 --camera gemini336')
     if args.gemini2_urdf_pose and args.gemini336_pose == 'calibration':
@@ -347,6 +351,7 @@ def _run(resources):
 
     # ── 机械臂 ──
     robot = None
+    live_publisher = None
     desired_rotation = None
     near_limit_home = False
     if not args.no_arm:
@@ -354,6 +359,23 @@ def _run(resources):
         print("初始化机械臂...")
         robot = RebotAdapter()
         resources.robot = robot
+
+        # Some versions of the arm SDK install their own SIGINT handler even
+        # with the keyboard listener disabled. Restore the web lifecycle so
+        # shutdown remains coordinated and return telemetry stays available.
+        if args.web_control:
+            signal.signal(signal.SIGINT, request_web_shutdown)
+
+        if args.web_control:
+            try:
+                live_publisher = LiveTelemetryPublisher.from_environment()
+                if live_publisher is not None:
+                    live_publisher.start()
+                    resources.live_publisher = live_publisher
+                    resources.phase_telemetry = PhaseTelemetry(robot, live_publisher).start()
+                    resources.phase_telemetry.set_phase('home')
+            except (OSError, ValueError, RuntimeError) as exc:
+                print(f'[网页] 实时状态不可用: {exc}', flush=True)
 
         try:
             result = initialize_home(
@@ -410,10 +432,9 @@ def _run(resources):
     # ── 共享状态 ────────────────────────────────────────────
     lock = threading.Lock()
     observation = TargetObservation()  # 访问由 lock 保护
-    run_control = RunControl(
-        following=bool(args.web_auto_follow and follow_enabled and not web_shutdown_requested[0]))
-    if run_control.following:
-        print('[跟随] HOME 已就绪，自动开始跟随', flush=True)
+    run_control = RunControl(following=False)
+    if follow_enabled:
+        print('[跟随] HOME 已就绪，等待按 R 或张开手掌 3 秒', flush=True)
     control_status = {"joint_speed": 0.0, "error": "", "active": False}
 
     if follow_enabled:
@@ -441,35 +462,33 @@ def _run(resources):
               f"张开 {pinch_open_px:.0f}px → {gripper_open_deg:.1f}°"
               f"  滤波={pinch_filter_mode}"
               + ("  [手臂运动时冻结]" if hold_while_moving else ""))
-    print("操作: g/空格 启停跟随 | q/Esc/Ctrl+C 退出并安全回零")
+    print("操作: R 开始跟随 | g/空格 暂停跟随 | q/Esc/Ctrl+C 退出并安全回零")
     print("=" * 60 + "\n")
 
     # ── 键盘监听 ────────────────────────────────────────────
-    last_toggle = 0.0
-
-    def toggle_tracking():
-        nonlocal last_toggle
+    def pause_tracking():
         if not follow_enabled:
             print("\n[跟随] 当前为 --no-follow 模式，跟随不可用")
             return
-        now = time.time()
         with lock:
-            if now - last_toggle < 0.25:
-                return
-            run_control.following = not run_control.following
-            enabled = run_control.following
-            last_toggle = now
-        print("\n[跟随] 启动" if enabled else "\n[跟随] 停止（保持当前位置）")
+            run_control.following = False
+            run_control.gesture_start_allowed = False
+        print("\n[跟随] 暂停（保持当前位置）")
 
     def on_press(key):
         try:
-            if key.char == 'g':
-                toggle_tracking()
+            if key.char in ('r', 'R'):
+                if follow_enabled:
+                    with lock:
+                        run_control.following = not run_control.servo_failed
+                        run_control.gesture_start_allowed = False
+            elif key.char == 'g':
+                pause_tracking()
             elif key.char == 'q':
                 run_control.quit_requested.set()    # headless 模式下的退出通道
         except AttributeError:
             if key == pynput_kb.Key.space:
-                toggle_tracking()
+                pause_tracking()
             elif key == pynput_kb.Key.esc:
                 run_control.quit_requested.set()    # Esc = 退出并安全回零（统一退出路径）
 
@@ -519,25 +538,18 @@ def _run(resources):
         except OSError as exc:
             print(f"[诊断] 日志初始化失败，不影响控制: {exc}")
             diag_recorder = None
-    live_publisher = None
-    if robot is not None and args.web_control:
-        try:
-            live_publisher = LiveTelemetryPublisher.from_environment()
-            if live_publisher is not None:
-                live_publisher.start()
-                resources.live_publisher = live_publisher
-        except (OSError, ValueError, RuntimeError) as exc:
-            print(f'[网页] 实时状态不可用，继续使用日志: {exc}', flush=True)
-            live_publisher = None
     feedback_sampler = None
     feedback_hz = 2.0 if near_limit_home else runtime_config.diag_actual_feedback_hz
-    if robot is not None and (near_limit_home or ((diag_recorder is not None or live_publisher is not None) and feedback_hz > 0.0)):
+    if args.camera == 'gemini336':
+        feedback_hz = 5.0
+    if robot is not None and (args.camera == 'gemini336' or near_limit_home or ((diag_recorder is not None or live_publisher is not None) and feedback_hz > 0.0)):
         try:
             feedback_sampler = ActualFeedbackSampler(
-                robot, hz=feedback_hz).start()
+                robot, hz=feedback_hz, paced=(args.camera == 'gemini336')).start()
             resources.feedback_sampler = feedback_sampler
             print(f"[反馈] 实际关节采样 {feedback_hz:.1f}Hz"
-                  + ('，用于近限位保护' if near_limit_home else '（仅诊断）'))
+                  + ('，用于桌面保护' if args.camera == 'gemini336'
+                     else '，用于近限位保护' if near_limit_home else '（仅诊断）'))
         except Exception as exc:
             print(f"[诊断] 实际关节采样启动失败，已禁用: {exc}")
             feedback_sampler = None
@@ -577,8 +589,11 @@ def _run(resources):
             compute_tcp_fk_and_jacobian=compute_tcp_fk_and_jacobian,
             pause_outside_workspace=pause_runtime_workspace,
             apply_stationary_joint_hold=apply_stationary_joint_hold,
+            table_safety_enabled=(args.camera == 'gemini336'),
         )
         servo_settings = ServoSettings.from_configuration(runtime_config)
+        if resources.phase_telemetry is not None:
+            resources.phase_telemetry.set_phase(None)
         ctrl_thread = threading.Thread(
             target=run_servo_loop, args=(servo_context, servo_settings), daemon=True)
         resources.control_thread = ctrl_thread
@@ -613,9 +628,11 @@ def _run(resources):
         robot=robot,
         run_control=run_control,
         timestamp_calibrator=timestamp_calibrator,
-        toggle_tracking=toggle_tracking,
+        pause_tracking=pause_tracking,
         web_shutdown_requested=web_shutdown_requested,
         one_euro_filter=OneEuroFilter,
+        startup_gate=OpenPalmStartGate() if follow_enabled and robot is not None else None,
+        request_start=lambda: web_commands.put('gesture'),
     ))
 
 

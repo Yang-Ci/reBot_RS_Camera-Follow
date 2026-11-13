@@ -69,6 +69,22 @@ class DepthGateTests(unittest.TestCase):
         self.assertEqual(self.gate.reference, 0)
         self.assertEqual(self.gate.rejected_frames, 0)
 
+    def test_diagnostics_distinguish_invalid_depth_jump_and_tracking_loss(self):
+        observation = track()
+        self.gate.update(observation, .4, project, 1.)
+        self.assertEqual(observation['depth_status'], '建立深度参考')
+        self.acquire()
+        observation = track()
+        self.gate.update(observation, 0., project, 1.1)
+        self.assertEqual(observation['depth_status'], '深度样本无效')
+        observation = track()
+        self.gate.update(observation, .7, project, 1.11)
+        self.assertEqual(observation['depth_status'], '深度跳变拒绝')
+        self.assertAlmostEqual(observation['depth_raw_m'], .7)
+        observation = track(lost=1)
+        self.gate.update(observation, 0., project, 1.12)
+        self.assertEqual(observation['depth_status'], '追踪丢失')
+
 
 if __name__ == '__main__':
     unittest.main()

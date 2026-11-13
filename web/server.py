@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 ROOT = Path(__file__).resolve().parent
 PROJECT = ROOT.parent
 sys.path.insert(0, str(ROOT))
-from robot_process import RobotProcess
+from robot_process import RobotProcess, speed_presets, validate_motion_settings
 from telemetry import read_latest_state, state_from_row
 
 controller = RobotProcess(PROJECT)
@@ -102,10 +102,14 @@ class Handler(SimpleHTTPRequestHandler):
                 raise ValueError('请求格式无效')
             path = urlparse(self.path).path
             if path == '/api/robot/start':
+                if body.get('confirm_home') is not True:
+                    raise ValueError('请先确认 HOME 路径、工作区和硬件急停')
+                kwargs = {}
                 if body.get('serial'):
-                    result = controller.start(body.get('speed', 'slow'), body.get('gripper', False), body['serial'])
-                else:
-                    result = controller.start(body.get('speed', 'slow'), body.get('gripper', False))
+                    kwargs['serial'] = body['serial']
+                if 'motion' in body:
+                    kwargs['motion'] = validate_motion_settings(body['motion'])
+                result = controller.start(body.get('speed', 'slow'), body.get('gripper', False), **kwargs)
             elif path == '/api/camera/start':
                 result = controller.preview_start(body.get('serial'))
             elif path == '/api/camera/stop':
@@ -123,6 +127,11 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json(409, {'error': str(exc)})
 
     def do_GET(self):
+        if urlparse(self.path).path == '/api/robot/presets':
+            try:
+                return self.send_json(200, {'presets': speed_presets(PROJECT)})
+            except Exception as exc:
+                return self.send_json(503, {'error': f'无法读取速度配置: {exc}'})
         if urlparse(self.path).path == '/api/cameras':
             try:
                 return self.send_json(200, {'cameras': controller.cameras()})

@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, Callable
 import numpy as np
 
 from robot_follow.control.feedback import near_limit_feedback_error, feedback_corrected_joints
+from robot_follow.control.table_safety import feedback_error, limit_downward_velocity
 from robot_follow.control.state import ServoState
 from robot_follow.runtime.observation import TargetObservation
 from robot_follow.runtime.control import RunControl
@@ -65,6 +66,7 @@ class ServoContext:
     compute_tcp_fk_and_jacobian: Callable[..., Any]
     pause_outside_workspace: Callable[..., Any]
     apply_stationary_joint_hold: Callable[..., Any]
+    table_safety_enabled: bool = False
 
 
 @dataclass(frozen=True)
@@ -140,15 +142,49 @@ class ServoSettings:
 
 
 def run_servo_loop(context: ServoContext, settings: ServoSettings):
+    """Keep a fatal control failure visible until the operator shuts down."""
+    try:
+        _run_servo_loop(context, settings)
+    except Exception as exc:
+        reason = f'伺服异常，已暂停: {exc}'
+        with context.lock:
+            context.control.following = False
+            context.control.gesture_start_allowed = False
+            context.control.servo_failed = True
+            context.control_status.update(active=False, joint_speed=0.0, error=reason)
+        try:
+            context.robot.hold()
+        except Exception as hold_error:
+            reason += f'；保持失败，请使用硬件急停: {hold_error}'
+            with context.lock:
+                context.control_status['error'] = reason
+        print(f'\n[安全] {reason}', flush=True)
+        # Do not silently restart or initiate an unverified return path. Keep
+        # reporting the fault until the operator requests shutdown.
+        while not context.stop_ctrl.is_set():
+            if context.live_publisher is not None:
+                context.live_publisher.offer({
+                    'host_time': time.monotonic(), 'following': 0, 'visible': 0,
+                    'hold_latch': 0, 'fb_valid': 0, 'q_cmd_valid': 0,
+                    'servo_failed': 1, 'error': reason})
+            context.stop_ctrl.wait(.5)
+
+
+def _run_servo_loop(context: ServoContext, settings: ServoSettings):
     next_deadline = time.monotonic()
     last_loop_time = None
     _zero3 = np.zeros(3)
     while not context.stop_ctrl.is_set():
-        if context.web_control:
-            while not context.web_commands.empty():
-                requested = context.web_commands.get_nowait()
-                with context.lock:
-                    context.control.following = requested and context.follow_enabled
+        while not context.web_commands.empty():
+            requested = context.web_commands.get_nowait()
+            with context.lock:
+                if requested == 'gesture':
+                    if context.control.gesture_start_allowed and context.follow_enabled:
+                        context.control.following = True
+                        context.control.gesture_start_allowed = False
+                else:
+                    context.control.following = bool(requested) and context.follow_enabled
+                    context.control.gesture_start_allowed = False
         if context.robot.is_stopping():
             with context.lock:
                 context.control.following = False
@@ -191,6 +227,25 @@ def run_servo_loop(context: ServoContext, settings: ServoSettings):
         if (visible and obs_time > 0.0
                 and t0 - obs_time > settings.target_stale_s):
             visible = False
+
+        # Keep the original observation-loss/coasting behavior while still
+        # requiring fresh actual-joint feedback for tabletop protection.
+        table_feedback = None
+        if following and context.table_safety_enabled:
+            table_feedback = (context.feedback_sampler.snapshot()
+                              if context.feedback_sampler is not None else None)
+            reason = feedback_error(table_feedback, time.monotonic())
+            if (not reason and target_cam is not None and
+                    (target_cam.shape != (3,) or not np.all(np.isfinite(target_cam)))):
+                reason = '手掌目标无效，已暂停'
+            if reason:
+                with context.lock:
+                    context.control.following = False
+                    context.control.gesture_start_allowed = False
+                    context.control_status['error'] = reason
+                    context.control_status['active'] = False
+                print(f'\n[安全] {reason}', flush=True)
+                following = False
 
         if not visible:
             context.servo_state.lost_counter += 1
@@ -274,7 +329,7 @@ def run_servo_loop(context: ServoContext, settings: ServoSettings):
 
             _kv_raw = context.kf.velocity() if context.kf.initialized else np.zeros(3)
             if frozen_meas:
-                # 深度无效时横向仍可跟随，但旧纵向速度不得继续注入。
+                # Original behavior: preserve lateral tracking, suppress stale depth velocity.
                 _kv_raw[2] = 0.0
             # 相机装在手腕上：KF 看到的是“手掌相对相机”的速度，
             # 机械臂自身的运动也会让静止手掌在画面里移动。静止判定
@@ -442,6 +497,21 @@ def run_servo_loop(context: ServoContext, settings: ServoSettings):
                                     if context.near_limit_home else current_joints)
                 tcp_pos, tcp_rot, J_robot = context.compute_tcp_fk_and_jacobian(
                     context.robot, kinematic_joints)
+                actual_tcp = tcp_pos
+                if context.table_safety_enabled:
+                    actual_tcp, _, _ = context.compute_tcp_fk_and_jacobian(
+                        context.robot, table_feedback['actual'])
+                    _, below_floor = limit_downward_velocity(0.0, tcp_pos[2], actual_tcp[2])
+                    if below_floor:
+                        with context.lock:
+                            context.control.following = False
+                            context.control.gesture_start_allowed = False
+                            context.control_status['active'] = False
+                            context.control_status['joint_speed'] = 0.0
+                            context.control_status['error'] = '桌面安全边界触发，已暂停'
+                        context.robot.hold()
+                        print('\n[安全] 桌面安全边界触发，保持并暂停', flush=True)
+                        continue
                 with context.lock:
                     context.control_status["tcp"] = tcp_pos.round(3).tolist()
 
@@ -598,6 +668,9 @@ def run_servo_loop(context: ServoContext, settings: ServoSettings):
                 v_world[0:3] = tcp_rot @ v_tcp[0:3]
                 v_world[3:6] = angular_world
 
+                if context.table_safety_enabled:
+                    v_world[2], _ = limit_downward_velocity(v_world[2], tcp_pos[2], actual_tcp[2])
+
                 wall_touch = False
                 for ax in range(3):
                     if tcp_pos[ax] <= settings.workspace_min[ax] and v_world[ax] < 0:
@@ -676,7 +749,11 @@ def run_servo_loop(context: ServoContext, settings: ServoSettings):
                 context.servo_state.last_joint_speed = 0.0
                 context.servo_state.settled_frames = 0
                 with context.lock:
-                    context.control_status["error"] = str(exc)
+                    if context.table_safety_enabled:
+                        context.control.following = False
+                        context.control.gesture_start_allowed = False
+                    context.control_status["error"] = (
+                        f'伺服异常，已暂停: {exc}' if context.table_safety_enabled else str(exc))
                     context.control_status["active"] = False
         else:
             context.stationary_joint_hold_active[0] = False

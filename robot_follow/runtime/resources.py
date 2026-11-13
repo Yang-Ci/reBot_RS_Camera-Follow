@@ -22,6 +22,7 @@ class RuntimeResources:
         self.feedback_sampler = None
         self.diagnostic_recorder = None
         self.live_publisher = None
+        self.phase_telemetry = None
         self.previous_handlers = {}
         self.original_sigint_handler = None
         self.web_ready_path = None
@@ -72,8 +73,8 @@ class RuntimeResources:
                 if self.control_thread.is_alive():
                     raise RuntimeError('等待超时，伺服线程仍在运行')
             attempt('等待伺服线程', join_control)
-        if self.live_publisher is not None:
-            attempt('停止实时状态', self.live_publisher.close)
+        if self.phase_telemetry is not None:
+            self.phase_telemetry.set_phase('return')
         # CAN feedback reads must stop before the arm's return-to-zero sequence.
         if self.feedback_sampler is not None:
             attempt('停止关节反馈', self.feedback_sampler.close)
@@ -97,6 +98,10 @@ class RuntimeResources:
             attempt('保持机械臂', hold_robot)
             print('正在安全回零（约3秒），窗口短暂无响应属正常现象，请勿重复按键...')
             attempt('机械臂回零失能', self.robot.stop)
+        if self.phase_telemetry is not None:
+            attempt('停止移动阶段状态', self.phase_telemetry.close)
+        if self.live_publisher is not None:
+            attempt('停止实时状态', self.live_publisher.close)
         if self.startup_preview is not None:
             attempt('停止启动预览', self.startup_preview.stop)
         if self.preview_writer is not None:

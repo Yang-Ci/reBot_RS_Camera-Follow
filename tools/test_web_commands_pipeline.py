@@ -27,6 +27,13 @@ class WebCommandPipelineTests(unittest.TestCase):
         receiver = LiveTelemetryReceiver('web-command-session')
         self.addCleanup(receiver.close)
         handlers, errors = {}, []
+        original_init = namespace['FakeRobot'].__init__
+        def sdk_sigint(*_args):
+            pass
+        def sdk_overwrites_sigint(robot):
+            original_init(robot)
+            module.signal.signal(signal.SIGINT, sdk_sigint)
+        namespace['FakeRobot'].__init__ = sdk_overwrites_sigint
 
         def install(sig, handler):
             if callable(handler):
@@ -45,13 +52,14 @@ class WebCommandPipelineTests(unittest.TestCase):
                 sample = receiver.latest()
                 if sample:
                     row, _ = sample
-                    if row.get('following') == expected and float(row['host_time']) >= after:
+                    if (row.get('following') == expected and not row.get('phase')
+                            and float(row['host_time']) >= after):
                         return
                 time.sleep(.01)
             self.fail(f'no following={expected} state after command; errors={errors}')
 
         env = {'REBOT_TELEMETRY_PORT': str(receiver.port), 'REBOT_TELEMETRY_TOKEN': receiver.token}
-        args = ['palm_follow_grasp.py', '--headless', '--web-control', '--web-auto-follow']
+        args = ['palm_follow_grasp.py', '--headless', '--web-control']
         with mock.patch.dict(os.environ, env), mock.patch.object(sys, 'argv', args), \
              mock.patch.object(module.signal, 'SIGUSR1', 1001, create=True), \
              mock.patch.object(module.signal, 'SIGUSR2', 1002, create=True), \
@@ -59,6 +67,9 @@ class WebCommandPipelineTests(unittest.TestCase):
             thread = threading.Thread(target=run, daemon=True)
             thread.start()
             try:
+                wait_following('0')
+                self.assertIsNot(handlers[signal.SIGINT], sdk_sigint)
+                handlers[1001](None, None)
                 wait_following('1')
                 command_time = time.monotonic()
                 handlers[1002](None, None)

@@ -64,11 +64,13 @@ def state_from_row(project, row, age):
                 actual = False
         command_valid = row.get('q_cmd_valid')
         following = row.get('following') == '1'
+        phase = row.get('phase', '')
         # Older logs did not include q_cmd_valid; active control was their only
         # command-validity indication. An explicit zero must never be overridden.
         usable_command = command_valid == '1' or (command_valid in (None, '') and following)
         if not actual and not usable_command:
-            return {'online': True, 'source': 'unavailable', 'joints': None, 'age_s': age,
+            return {'online': True, 'source': 'unavailable', 'joints': None, 'age_s': age, 'phase': phase,
+                    'servo_failed': row.get('servo_failed') == '1',
                     'visible': row.get('visible') == '1', 'following': following,
                     'hold': row.get('hold_latch') == '1', 'error': row.get('error', '')}
         source = 'actual' if actual else 'command'
@@ -97,7 +99,8 @@ def state_from_row(project, row, age):
                                               for q, c, p, offset in zip(joints, command, paired, offsets)]
             except (KeyError, TypeError, ValueError):
                 pass
-        return {'online': True, 'source': source, 'joints': joints,
+        return {'online': True, 'source': source, 'joints': joints, 'phase': phase,
+                'servo_failed': row.get('servo_failed') == '1',
                 'model_joints': model_joints, 'age_s': age,
                 'estimated_model_joints': estimated_model_joints,
                 'visible': row.get('visible') == '1', 'following': row.get('following') == '1',

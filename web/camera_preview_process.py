@@ -34,9 +34,9 @@ def main():
             raise ValueError('所选设备不是 Gemini 336')
         writer = CameraPreviewWriter(sys.argv[3])
         while not stop.is_set():
-            color, _, _ = camera.get_frames()
+            color, depth, scale = camera.get_frames()
             if color is not None:
-                writer.submit(color)
+                writer.submit(color, depth, scale)
             else:
                 stop.wait(.01)
     finally:

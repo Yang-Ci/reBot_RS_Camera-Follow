@@ -113,11 +113,14 @@ def feedback_age_ms(snapshot, now, hz):
 class ActualFeedbackSampler:
     """独立低频读取实际关节角及对应指令；由调用方决定如何使用样本。"""
 
-    def __init__(self, robot, hz=1.0, max_failures=3):
+    def __init__(self, robot, hz=1.0, max_failures=3, paced=False):
         self.robot = robot
+        self.paced = bool(paced and callable(getattr(robot, 'get_paced_feedback', None)))
         self.hz = float(hz)
         if not 0.0 < self.hz <= 20.0:
             raise ValueError("实际关节诊断采样频率须在 (0, 20] Hz")
+        if self.paced:
+            self.hz = min(self.hz, 5.0)
         self.period_s = 1.0 / self.hz
         self.max_failures = max(1, int(max_failures))
         self.failures = 0
@@ -138,13 +141,16 @@ class ActualFeedbackSampler:
         """读取实际角后立即记录内存指令角，供同点跟踪误差分析。"""
         started = time.monotonic()
         try:
-            actual = self.robot.get_current_pos()
-            command = self.robot.get_command_pos()
+            if self.paced:
+                actual, command = self.robot.get_paced_feedback(self._stop)
+            else:
+                actual = self.robot.get_current_pos()
+                command = self.robot.get_command_pos()
             finished = time.monotonic()
             read_ms = (finished - started) * 1000.0
             # 同步读持有与电机下发相同的锁。高频读取耗时过高时立即
             # 永久回退，避免持续挤占控制通信；不影响近限位 2Hz 保护。
-            if self.hz > 2.0 and read_ms > 10.0:
+            if not self.paced and self.hz > 2.0 and read_ms > 10.0:
                 self.hz = 1.0
                 self.period_s = 1.0
                 print(f"[反馈] 同步读取耗时 {read_ms:.1f}ms，已回退到 1Hz", flush=True)

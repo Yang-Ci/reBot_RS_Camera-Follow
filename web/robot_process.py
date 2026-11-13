@@ -7,9 +7,45 @@ import subprocess
 import threading
 import time
 import json
+import math
 from pathlib import Path
 
 from live_telemetry import LiveTelemetryReceiver
+
+
+def validate_motion_settings(settings):
+    """Reject missing, non-numeric and out-of-range values before any robot action."""
+    if not isinstance(settings, dict) or set(settings) != {'gain', 'gain_x', 'max_vel'}:
+        raise ValueError('请完整填写跟随增益、水平增益和最大速度')
+    limits = {'gain': (3.5, '跟随增益'), 'gain_x': (2.5, '水平增益'),
+              'max_vel': (0.70, '最大速度')}
+    result = {}
+    for key, (maximum, label) in limits.items():
+        value = settings[key]
+        if (isinstance(value, bool) or not isinstance(value, (int, float))
+                or not 0 < value <= maximum or not math.isfinite(value)):
+            raise ValueError(f'{label}必须大于 0 且不超过 {maximum}')
+        result[key] = float(value)
+    return result
+
+
+def speed_presets(project):
+    """Read the same base and camera profiles used by the controller."""
+    import yaml
+    follow = {'gain': 2.5, 'gain_x': 1.8, 'max_vel': 0.30}
+    for name in ('follow.yaml', 'follow_gemini336.yaml'):
+        path = Path(project) / 'config' / name
+        if not path.exists() and name == 'follow.yaml':
+            continue
+        with path.open(encoding='utf-8') as stream:
+            data = yaml.safe_load(stream) or {}
+        if not isinstance(data, dict) or not isinstance(data.get('follow', {}), dict):
+            raise ValueError(f'{name} 跟随配置无效')
+        follow.update(data.get('follow', {}))
+    configured = validate_motion_settings({key: follow[key] for key in ('gain', 'gain_x', 'max_vel')})
+    return {'slow': {'gain': 1.5, 'gain_x': 1.5, 'max_vel': 0.10},
+            'medium': {'gain': 1.9, 'gain_x': 1.9, 'max_vel': 0.25},
+            'configured': configured}
 
 
 class RobotProcess:
@@ -28,6 +64,8 @@ class RobotProcess:
         self.preview_serial = None
         self.camera_lock = None
         self.telemetry = None
+        self.motion_settings = None
+        self.speed_mode = None
 
     def cameras(self):
         python = self.project / '.venv-arm/bin/python'
@@ -151,13 +189,17 @@ class RobotProcess:
             preview_running = self.preview_process is not None and self.preview_process.poll() is None
             preview_failed = self.preview_process is not None and not preview_running
             return {'running': running, 'ready': self._ready(), 'stopping': self.stopping and running,
+                    'motion_settings': self.motion_settings if running else None,
+                    'speed_mode': self.speed_mode if running else None,
                     'preview_running': preview_running, 'preview_failed': preview_failed,
                     'exit_code': None if self.process is None else self.process.poll(),
                     'started_at': self.started_at, 'ended_at': self.ended_at, 'log': self.log_path.name if self.log_path else None}
 
-    def start(self, speed='slow', gripper=False, serial=None):
-        if speed not in ('slow', 'configured') or type(gripper) is not bool:
+    def start(self, speed='slow', gripper=False, serial=None, motion=None):
+        if speed not in ('slow', 'medium', 'configured') or type(gripper) is not bool:
             raise ValueError('无效的速度或夹爪选项')
+        if motion is not None:
+            motion = validate_motion_settings(motion)
         with self.lock:
             if self._running():
                 raise RuntimeError('网页已启动真机程序')
@@ -192,11 +234,18 @@ class RobotProcess:
             self.log_path = logs / f'web_controller_{time.strftime("%Y%m%d_%H%M%S")}_{token[:6]}.log'
             args = [str(python), '-u', str(self.project / 'palm_follow_grasp.py'),
                     '--camera', 'gemini336', '--headless', '--web-control',
-                    '--web-auto-follow', '--home-j34-tolerance', '3.5']
+                    '--home-j34-tolerance', '3.5']
             if not gripper:
                 args += ['--no-gripper', '--keep-gripper-position']
-            if speed == 'slow':
+            if motion is not None:
+                args += ['--gain', str(motion['gain']), '--gain-x', str(motion['gain_x']),
+                         '--max-vel', str(motion['max_vel'])]
+                if speed in ('slow', 'medium'):
+                    args += ['--home-speed', '4']
+            elif speed == 'slow':
                 args += ['--gain', '1.5', '--gain-x', '1.5', '--max-vel', '0.10', '--home-speed', '4']
+            elif speed == 'medium':
+                args += ['--gain', '1.9', '--gain-x', '1.9', '--max-vel', '0.25', '--home-speed', '4']
             env = os.environ.copy()
             env.pop('REBOT_TELEMETRY_PORT', None)
             env.pop('REBOT_TELEMETRY_TOKEN', None)
@@ -214,6 +263,8 @@ class RobotProcess:
                     self.process = subprocess.Popen(args, cwd=str(self.project), env=env,
                                                     stdin=subprocess.DEVNULL, stdout=output,
                                                     stderr=subprocess.STDOUT, start_new_session=True)
+                    self.motion_settings = motion
+                    self.speed_mode = speed
             except BaseException:
                 if self.telemetry is not None:
                     self.telemetry.close()
@@ -224,7 +275,7 @@ class RobotProcess:
                 self._unlock_camera()
                 raise
             self.stopping = False
-            return {'ok': True, 'message': '正在移动到 HOME；通过到位检查后将自动跟随'}
+            return {'ok': True, 'message': '正在移动到 HOME；到位后等待按 R 或张开手掌 3 秒'}
 
     def live_telemetry(self):
         with self.lock:

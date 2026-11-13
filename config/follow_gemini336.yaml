@@ -11,5 +11,5 @@ follow:
   stationary_joint_hold: true
   kf_fast_start_enable: false
   vel_feedforward: 0.5
-  # 目标 20Hz；同步读取超过 10ms 时自动降至 1Hz，实际频率需实机验证。
-  diag_actual_feedback_hz: 20.0
+  # Gemini 336 安全保护使用逐关节读取，目标 5Hz；实机时效与通信负载需验证。
+  diag_actual_feedback_hz: 5.0

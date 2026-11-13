@@ -32,6 +32,7 @@ CHECKS = (
     Check('CLI failure status', ('tools/test_cli_exit.py',)),
     Check('live telemetry pipeline', ('tools/test_live_pipeline.py',)),
     Check('web command pipeline', ('tools/test_web_commands_pipeline.py',)),
+    Check('three-second start gesture', ('tools/test_gesture_pipeline.py',)),
     Check('web telemetry compatibility', ('tools/test_web_sync.py',), linux_only=True),
     Check('web process management', ('tools/test_robot_web_control.py',), linux_only=True),
     Check('web signal process', ('tools/test_robot_web_fake.py',), linux_only=True),

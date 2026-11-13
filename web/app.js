@@ -12,6 +12,7 @@
   const robotFrame = new THREE.Group(); robotFrame.rotation.x = -Math.PI / 2; scene.add(robotFrame);
   let mode = 'monitor';
   let controllerState = {running:false, ready:false, stopping:false}, robotActionPending = false, currentFollowing = false, telemetryOnline = false;
+  let controllerConnected = false, speedPresets = null, servoFault = false;
   let robot = null, angle = .72, elevation = .43, distance = 1.8, pointer = null;
   const target = new THREE.Vector3(0,.27,0);
   function view(){camera.position.set(target.x+distance*Math.cos(elevation)*Math.sin(angle),target.y+distance*Math.sin(elevation),target.z+distance*Math.cos(elevation)*Math.cos(angle));camera.lookAt(target);}
@@ -202,18 +203,50 @@
   window.addEventListener('pagehide', () => stopCamera());
 
   function robotMessage(value, error = false) { $('robotMessage').textContent = value; $('robotMessage').classList.toggle('error', error); }
+  const motionFields = {gain:'robotGain', gain_x:'robotGainX', max_vel:'robotMaxVel'};
+  function showMotion(settings) {
+    for (const [key, id] of Object.entries(motionFields)) $(id).value = settings?.[key] ?? '';
+  }
+  function selectSpeedPreset() {
+    if (speedPresets) showMotion(speedPresets[$('robotSpeed').value]);
+    $('robotSafetyConfirm').checked = false;
+    $('robotParameterHint').textContent = '切换档位加载预设；修改在下次初始化时生效。已调整速度档的 HOME 速度可能更快。';
+    updateRobotButtons();
+  }
+  $('robotSpeed').addEventListener('change', selectSpeedPreset);
+  for (const id of Object.values(motionFields)) $(id).addEventListener('input', () => {
+    $('robotSafetyConfirm').checked = false;
+    $('robotParameterHint').textContent = '参数已调整；仅在下次初始化时生效。';
+    updateRobotButtons();
+  });
+  for (const id of ['robotGripper', 'robotCameraDevice']) $(id).addEventListener('change', () => {
+    $('robotSafetyConfirm').checked = false;
+    updateRobotButtons();
+  });
+  async function loadSpeedPresets() {
+    try {
+      const response = await fetch('/api/robot/presets', {cache:'no-store'}), data = await response.json();
+      if (!response.ok) throw Error(data.error || '读取速度配置失败');
+      speedPresets = data.presets;
+      if (!controllerState.running) selectSpeedPreset();
+      updateRobotButtons();
+    } catch (error) { speedPresets = null; robotMessage(error.message, true); updateRobotButtons(); }
+  }
   function updateRobotButtons() {
     const active = controllerState.running, ready = active && controllerState.ready && !controllerState.stopping;
-    $('robotStart').disabled = active || robotActionPending;
-    $('robotSpeed').disabled = active || robotActionPending;
-    $('robotGripper').disabled = active || robotActionPending;
-    $('robotFollow').disabled = !ready || !telemetryOnline || currentFollowing || robotActionPending;
-    $('robotPause').disabled = !ready || !telemetryOnline || !currentFollowing || robotActionPending;
-    $('robotStop').disabled = !active || controllerState.stopping || robotActionPending;
+    const unavailable = !controllerConnected || robotActionPending;
+    $('robotStart').disabled = unavailable || !speedPresets || active || !$('robotSafetyConfirm').checked;
+    $('robotSpeed').disabled = unavailable || !speedPresets || active;
+    $('robotGripper').disabled = unavailable || active;
+    $('robotSafetyConfirm').disabled = unavailable || active;
+    for (const id of Object.values(motionFields)) $(id).disabled = unavailable || !speedPresets || active;
+    $('robotFollow').disabled = unavailable || !ready || !telemetryOnline || currentFollowing || servoFault;
+    $('robotPause').disabled = unavailable || !ready || servoFault;
+    $('robotStop').disabled = unavailable || !active || controllerState.stopping;
     $('modeCamera').disabled = active || robotActionPending;
-    $('robotCameraDevice').disabled = active || controllerState.preview_running || robotActionPending;
-    $('robotCameraRefresh').disabled = active || controllerState.preview_running || robotActionPending;
-    $('robotCameraToggle').disabled = active || robotActionPending;
+    $('robotCameraDevice').disabled = unavailable || active || controllerState.preview_running;
+    $('robotCameraRefresh').disabled = unavailable || active || controllerState.preview_running;
+    $('robotCameraToggle').disabled = unavailable || active;
     $('robotCameraToggle').textContent = controllerState.preview_running ? '关闭摄像头' : '打开摄像头';
   }
   async function robotAction(action, body = {}) {
@@ -228,20 +261,26 @@
     } catch (error) { robotMessage(error.message, true); }
     finally { robotActionPending = false; updateRobotButtons(); }
   }
-  $('robotStart').addEventListener('click', () => robotAction('start', {speed:$('robotSpeed').value, gripper:$('robotGripper').value === 'gesture', serial:$('robotCameraDevice').value || null}));
+  $('robotStart').addEventListener('click', () => {
+    for (const id of Object.values(motionFields)) if (!$(id).reportValidity()) return;
+    const motion = Object.fromEntries(Object.entries(motionFields).map(([key, id]) => [key, Number($(id).value)]));
+    robotAction('start', {speed:$('robotSpeed').value, gripper:$('robotGripper').value === 'gesture', serial:$('robotCameraDevice').value || null, motion, confirm_home:$('robotSafetyConfirm').checked});
+  });
+  $('robotSafetyConfirm').addEventListener('change', updateRobotButtons);
   $('robotFollow').addEventListener('click', () => robotAction('follow', {enabled:true}));
   $('robotPause').addEventListener('click', () => robotAction('follow', {enabled:false}));
   $('robotStop').addEventListener('click', () => robotAction('shutdown'));
   document.addEventListener('keydown', event => {
     if (mode !== 'monitor' || event.repeat || event.ctrlKey || event.metaKey || event.altKey) return;
     const tag = event.target?.tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA' || event.target?.isContentEditable) return;
+    if ((tag === 'INPUT' || tag === 'TEXTAREA' || event.target?.isContentEditable) && event.key !== 'Escape') return;
     if ((event.key === 'q' || event.key === 'Q' || event.key === 'Escape') && controllerState.running && !controllerState.stopping) {
       event.preventDefault(); if (!$('robotStop').disabled) $('robotStop').click();
+    } else if ((event.key === 'r' || event.key === 'R') && tag !== 'SELECT') {
+      event.preventDefault(); if (!$('robotFollow').disabled) $('robotFollow').click();
     } else if ((event.code === 'Space' || event.key === ' ') && tag !== 'SELECT') {
       event.preventDefault();
-      const button = currentFollowing ? $('robotPause') : $('robotFollow');
-      if (!button.disabled) button.click();
+      if (!$('robotPause').disabled) $('robotPause').click();
     }
   });
   async function refreshRobotCameras() {
@@ -278,22 +317,30 @@
       const response = await fetch('/api/controller', {cache:'no-store'});
       if (!response.ok) throw Error('service');
       const state = await response.json(), old = controllerState;
+      controllerConnected = true;
       controllerState = state;
+      if (state.running && !old.running) {
+        $('robotSafetyConfirm').checked = false;
+        if (state.speed_mode) $('robotSpeed').value = state.speed_mode;
+        showMotion(state.motion_settings);
+        if (!state.motion_settings) $('robotParameterHint').textContent = '当前运行的参数不可用；请查看程序日志。';
+      }
       if (state.preview_failed && !old.preview_failed) $('robotCameraMessage').textContent = '相机打开失败，请检查连接或其他程序占用后重试。';
-      if (state.running && !old.running) robotMessage('程序启动中：机械臂将移动到 HOME，通过到位检查后自动跟随。');
-      if (state.ready && !old.ready) robotMessage('真机已就绪，自动跟随已启用；可按空格暂停。');
+      if (state.running && !old.running) robotMessage('程序启动中：机械臂将移动到 HOME。');
+      if (state.ready && !old.ready) robotMessage('HOME 已就绪，按 R 或张开手掌 3 秒开始跟随。');
       if (state.stopping && !old.stopping) robotMessage('正在退出：机械臂将回零并失能。');
       if (!state.running && (old.running || state.error_summary)) robotMessage(state.exit_code === 0 ? '真机程序已退出。' : (state.error_summary || '真机程序已退出，请检查程序信息。'), state.exit_code !== 0);
       $('robotError').hidden = !state.error_log; $('robotErrorText').textContent = state.error_log || '';
       if (state.running && mode === 'camera') chooseMode('monitor');
       updateRobotButtons();
     } catch (_) {
+      controllerConnected = false;
       controllerState = {running:false, ready:false, stopping:false};
-      $('robotStart').disabled = true; $('robotFollow').disabled = true; $('robotPause').disabled = true; $('robotStop').disabled = true; $('modeCamera').disabled = false;
+      updateRobotButtons();
       robotMessage('网页服务未连接，无法操作真机。', true);
     }
   }
-  updateController(); setInterval(updateController, 500);
+  updateController(); loadSpeedPresets(); setInterval(updateController, 500);
 
   let previewURL = null, previewPending = false, previewEpoch = 0;
   function resetRealPreview() {
@@ -343,6 +390,6 @@
   setInterval(updateRealPreview, 100);
 
   let stateRequestPending = false;
-  async function update(){if (mode !== 'monitor' || stateRequestPending) return; stateRequestPending = true; try{const res=await fetch('/api/state',{cache:'no-store'});if(!res.ok)throw Error('network');const s=await res.json();if(mode !== 'monitor')return;telemetryOnline=!!s.online;currentFollowing=!!s.following;updateRobotButtons();$('dot').classList.toggle('online',s.online);$('connection').textContent=s.online?'数据更新中':'未连接';$('source').textContent=s.online?(s.source==='actual'?(s.estimated_model_joints ? `模型估算 · 数值为实际反馈（目标 ${s.feedback_rate_hz || '—'} Hz）` : '实际反馈'):s.source==='command'?'关节指令（非实测）':'等待有效关节数据'):'暂无实时数据';if(s.online && !s.model_joints && s.joints) $('source').textContent+=' · 缺少零位修正，模型未更新';$('follow').textContent=s.online?(s.following?'正在跟随':'等待跟随'):'等待数据';$('palm').textContent=s.online?(s.visible?'已检测':'未检测'):'—';$('hold').textContent=s.online?(s.hold?'已保持':'未保持'):'—';if(s.online && Array.isArray(s.joints)){s.joints.forEach((v,i)=>{const deg=v*180/Math.PI;$('joint'+i).textContent=deg.toFixed(1)+'°';$('bar'+i).style.width=Math.min(100,Math.abs(deg)/180*100)+'%';});const nextModel = s.estimated_model_joints || s.model_joints;if(Array.isArray(nextModel) && nextModel.length === 6 && nextModel.every(Number.isFinite)){monitorTarget=nextModel.slice();if(!monitorJoints)monitorJoints=monitorTarget.slice();}}else{monitorTarget=null;}}catch(_){if(mode !== 'monitor')return;monitorTarget=null;telemetryOnline=false;updateRobotButtons();$('dot').classList.remove('online');$('connection').textContent='服务未连接';$('source').textContent='暂无实时数据';$('follow').textContent='等待数据';$('palm').textContent='—';$('hold').textContent='—';}finally{stateRequestPending=false;}}
+  async function update(){if (mode !== 'monitor' || stateRequestPending) return; stateRequestPending = true; try{const res=await fetch('/api/state',{cache:'no-store'});if(!res.ok)throw Error('network');const s=await res.json();if(mode !== 'monitor')return;telemetryOnline=!!s.online;currentFollowing=!!s.following;servoFault=!!s.servo_failed;updateRobotButtons();$('dot').classList.toggle('online',s.online);$('connection').textContent=s.online?'数据更新中':'未连接';$('source').textContent=s.online?(s.source==='actual'?(s.estimated_model_joints ? `模型估算 · 数值为实际反馈（目标 ${s.feedback_rate_hz || '—'} Hz）` : '实际反馈'):s.source==='command'?'关节指令（非实测）':'等待有效关节数据'):'暂无实时数据';if(s.online && !s.model_joints && s.joints) $('source').textContent+=' · 缺少零位修正，模型未更新';$('follow').textContent=s.online?(s.phase==='home'?'正在前往 HOME':s.phase==='return'?'正在回零':s.following?'正在跟随':'等待跟随'):'等待数据';$('robotSafetyStatus').textContent=(s.online&&((!s.following&&/暂停|丢失|反馈|错误|无效|异常|超时/.test(s.error||''))||/深度估算|低速恢复/.test(s.error||'')))?s.error:'';$('palm').textContent=s.online?(s.visible?'已检测':'未检测'):'—';$('hold').textContent=s.online?(s.hold?'已保持':'未保持'):'—';if(s.online && Array.isArray(s.joints)){s.joints.forEach((v,i)=>{const deg=v*180/Math.PI;$('joint'+i).textContent=deg.toFixed(1)+'°';$('bar'+i).style.width=Math.min(100,Math.abs(deg)/180*100)+'%';});const nextModel = s.estimated_model_joints || s.model_joints;if(Array.isArray(nextModel) && nextModel.length === 6 && nextModel.every(Number.isFinite)){monitorTarget=nextModel.slice();if(!monitorJoints)monitorJoints=monitorTarget.slice();}}else{monitorTarget=null;}}catch(_){if(mode !== 'monitor')return;monitorTarget=null;telemetryOnline=false;updateRobotButtons();$('dot').classList.remove('online');$('connection').textContent='服务未连接';$('source').textContent='暂无实时数据';$('follow').textContent='等待数据';$('palm').textContent='—';$('hold').textContent='—';}finally{stateRequestPending=false;}}
   update();setInterval(update,33);
 })();

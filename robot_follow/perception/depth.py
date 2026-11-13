@@ -10,12 +10,14 @@ class DepthGate:
     """Reject jumps and validate reacquisition before projecting a 3D target."""
 
     def __init__(self, *, desired_depth: float, max_jump: float, max_step: float,
-                 freeze_seconds: float, depth_filter: Callable[[float], float]):
+                 freeze_seconds: float, depth_filter: Callable[[float], float],
+                 reuse_last_depth: bool = False):
         self.desired_depth = desired_depth
         self.max_jump = max_jump
         self.max_step = max_step
         self.freeze_seconds = freeze_seconds
         self.depth_filter = depth_filter
+        self.reuse_last_depth = reuse_last_depth
         self.reference = 0.0
         self.reference_time = 0.0
         self.rejected_frames = 0
@@ -30,6 +32,10 @@ class DepthGate:
 
     def update(self, track, depth_m, project, now):
         """Update track in place; depth is used only for a fresh observation."""
+        if track is not None:
+            track['depth_raw_m'] = float(depth_m)
+            track['depth_status'] = ('追踪丢失' if track['lost'] != 0 else
+                                     '深度样本无效' if depth_m <= 0 else '有效')
         if track is None or track['lost'] >= 30:
             self.reset_reference()
             return
@@ -39,12 +45,14 @@ class DepthGate:
         if depth_m > 0 and self.reference > 0 and abs(depth_m - self.reference) > self.max_jump:
             self.rejected_frames += 1
             if self.rejected_frames < 15:
+                track['depth_status'] = '深度跳变拒绝'
                 depth_m = 0.0
         else:
             self.rejected_frames = 0
 
         if depth_m > 0 and self.reference == 0:
             if depth_m > self.desired_depth + 0.25:
+                track['depth_status'] = '超出初始距离'
                 depth_m = 0.0
                 self.reacquisition.clear()
             else:
@@ -55,6 +63,7 @@ class DepthGate:
                         max(self.reacquisition) - min(self.reacquisition) <= self.max_jump):
                     depth_m = float(np.median(self.reacquisition))
                 else:
+                    track['depth_status'] = '建立深度参考'
                     depth_m = 0.0
 
         if depth_m > 0:
@@ -66,9 +75,10 @@ class DepthGate:
             self.reference_time = now
             track['x3d'], track['y3d'], track['z3d'] = project(track['u'], track['v'], depth_m)
             track['z3d_frozen'] = False
-        elif self.reference > 0 and now - self.reference_time <= self.freeze_seconds:
+        elif self.reference > 0 and (self.reuse_last_depth or
+                                     now - self.reference_time <= self.freeze_seconds):
             track['x3d'], track['y3d'], _ = project(track['u'], track['v'], self.reference)
-            track['z3d'] = self.desired_depth
+            track['z3d'] = self.reference if self.reuse_last_depth else self.desired_depth
             track['z3d_frozen'] = True
         else:
             track['z3d'] = 0.0

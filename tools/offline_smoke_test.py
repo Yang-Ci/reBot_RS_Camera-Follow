@@ -158,9 +158,9 @@ class FakeListener:
         self.timer = None
 
     def start(self):
-        def press_g():
-            self.on_press(types.SimpleNamespace(char="g"))
-        self.timer = threading.Timer(0.10, press_g)
+        def press_r():
+            self.on_press(types.SimpleNamespace(char="r"))
+        self.timer = threading.Timer(0.10, press_r)
         self.timer.daemon = True
         self.timer.start()
 
@@ -179,7 +179,7 @@ palm_module.PalmDetector = FakeDetector
 palm_module.PalmTracker = FakeTracker
 palm_module.OneEuroFilter = FakeOneEuro
 palm_module.LKPalmBridge = FakeBridge
-palm_module.get_median_depth = lambda depth, scale, u, v: 0.35
+palm_module.get_median_depth = lambda depth, scale, u, v, **kwargs: 0.35
 palm_module.pixel_to_3d = lambda u, v, z, fx, fy, cx, cy: (
     (u - cx) * z / fx, (v - cy) * z / fy, z)
 palm_module.draw_palm = lambda *args, **kwargs: None

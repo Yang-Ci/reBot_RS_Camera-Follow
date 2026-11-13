@@ -1,8 +1,8 @@
-.venv/
+.venv
 __pycache__/
 logs/
-.venv-arm/
-vendor/
+.venv-arm
+vendor
 Log/
 output/
 *.py[cod]

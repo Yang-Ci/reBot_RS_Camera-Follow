@@ -6,6 +6,8 @@ import os
 import queue
 import socket
 import threading
+import time
+import math
 
 
 class LiveTelemetryPublisher:
@@ -73,6 +75,52 @@ class LiveTelemetryPublisher:
                         continue
         except OSError:
             return
+
+    def close(self):
+        self._stop.set()
+        self._thread.join(timeout=1.0)
+
+
+class PhaseTelemetry:
+    """Publish command angles during HOME/return without extra CAN reads."""
+
+    def __init__(self, robot, publisher, period=0.05):
+        self.robot, self.publisher, self.period = robot, publisher, period
+        self._phase = None
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, name='phase-telemetry', daemon=True)
+
+    def start(self):
+        self._thread.start()
+        return self
+
+    def set_phase(self, phase):
+        if phase not in (None, 'home', 'return'):
+            raise ValueError('invalid movement phase')
+        with self._lock:
+            self._phase = phase
+
+    def _run(self):
+        while not self._stop.is_set():
+            with self._lock:
+                phase = self._phase
+            if phase:
+                try:
+                    joints = [float(q) for q in self.robot.get_command_pos()]
+                    if len(joints) == 6 and all(math.isfinite(q) for q in joints):
+                        row = {'host_time': time.monotonic(), 'phase': phase,
+                               'q_cmd_valid': 1, 'fb_valid': 0,
+                               'following': 0, 'visible': 0, 'hold_latch': 0}
+                        row.update({f'q_cmd_{i + 1}': q for i, q in enumerate(joints)})
+                        # A phase transition may occur while reading angles.
+                        # Never publish a stale HOME sample after servo starts.
+                        with self._lock:
+                            if self._phase == phase:
+                                self.publisher.offer(row)
+                except (AttributeError, TypeError, ValueError, RuntimeError):
+                    pass
+            self._stop.wait(self.period)
 
     def close(self):
         self._stop.set()

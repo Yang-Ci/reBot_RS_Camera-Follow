@@ -275,6 +275,31 @@ class RebotAdapter:
         """
         return np.deg2rad(self.io.read_joint_positions_deg())
 
+    def get_paced_feedback(self, stop_event):
+        """Read each joint separately so the MIT sender can run between reads.
+
+        Each actual angle is paired with the corresponding command after that
+        read. The sampler timestamps the *entire* sweep, including lock waits.
+        No partial sweep is returned on failure or shutdown.
+        """
+        arm = self.io.arm
+        actual, command = [], []
+        if len(arm.motors) < 6:
+            raise RuntimeError('关节反馈电机数量不足')
+        for index in range(6):
+            if stop_event.is_set():
+                raise RuntimeError('关节反馈采样已停止')
+            with arm._io_lock_guard(timeout=0.020):
+                angle = arm.motors[index].robstride_get_param_f32(
+                    0x7019, timeout_ms=50)
+            actual.append(float(angle))
+            command.append(np.deg2rad(arm.get_command_angles()[index]))
+            # Yield the shared CAN lock between reads; interruption aborts the
+            # entire snapshot instead of publishing partially updated angles.
+            if index < 5 and stop_event.wait(0.003):
+                raise RuntimeError('关节反馈采样已停止')
+        return np.asarray(actual), np.asarray(command)
+
     def get_command_pos(self):
         """
         返回 6 关节"当前实际下发值"（弧度）：rebot_control 内部 200Hz 斜坡

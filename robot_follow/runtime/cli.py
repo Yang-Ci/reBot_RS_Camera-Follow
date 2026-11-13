@@ -67,5 +67,5 @@ def parse_args(argv=None):
     p.add_argument("--web-control", action="store_true",
                    help="由本机网页进程接收跟随启停信号，键盘快捷键由网页处理")
     p.add_argument("--web-auto-follow", action="store_true",
-                   help="网页控制模式通过 HOME 检查后自动开始跟随")
+                   help="已停用：HOME 到位后需要主动启动跟随")
     return p.parse_args(argv)
