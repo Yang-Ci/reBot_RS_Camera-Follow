@@ -4,7 +4,7 @@
 
 ## 致谢
 
-本项目在手掌跟随、视觉伺服和夹爪控制方面借鉴了 [TonyWeyyy / Rebot_B601_RS_CV_Control](https://github.com/TonyWeyyy/Rebot_B601_RS_CV_Control) 的思路，感谢作者及贡献者。Gemini 2 V1 平视版支架由本项目作者制作。
+感谢 [TonyWeyyy / Rebot_B601_RS_CV_Control](https://github.com/TonyWeyyy/Rebot_B601_RS_CV_Control) 提供的思路。
 
 机械臂控制使用 [LAN-GER / rebot_control](https://github.com/LAN-GER/rebot_control)；网页模型使用 [Yang-Ci / ReBot_Arm_DigitalTwin_RS](https://github.com/Yang-Ci/ReBot_Arm_DigitalTwin_RS) 的数字孪生资源。相机支架来源及许可见[支架说明](models/wrist_camera/gemini2-v1-level/README.txt)和[模型说明](models/wrist_camera/README.md)。
 
@@ -15,6 +15,76 @@
 - 支持拇指、食指捏合控制夹爪，也可以选择保持夹爪当前位置。
 - 本地网页可预览相机与深度图、显示关节状态和三维模型，并调整跟随增益及速度。
 - HOME 到位后可按 `R`、点击网页按钮，或持续张开手掌 3 秒开始跟随。
+
+## 工作原理
+
+```text
+腕部相机                 视觉处理                          机械臂控制
+RGB 图像 ───────┐    手掌关键点 ── 掌心像素 ──┐
+               ├──→                         ├──→ 三维目标 ─→ 滤波与预测
+对齐深度图 ─────┘    掌心附近深度采样 ────────┘                 │
+                                                               ↓
+              CAN ←── 关节速度 / 位置指令 ←── 雅可比逆解 ←── 坐标变换与伺服
+
+手指关键点 ─→ 拇指 / 食指距离 ─→ 滤波与开合映射 ─→ 夹爪指令
+本地网页   ─→ 控制程序启停、参数设置；接收状态并显示相机 / 机械臂模型
+```
+
+视觉线程负责相机取帧、手掌识别和深度采样；伺服线程读取最新目标，结合机械臂运动学计算关节指令。夹爪与手掌跟随共用手部检测结果。网页通过本机服务管理控制程序，并显示反馈、指令或估算状态；显示来源以页面标识为准。
+
+## 项目结构
+
+```text
+reBot_RS_Camera-Follow/
+├── palm_follow_grasp.py           # 手掌跟随与捏合抓取主入口
+├── palm_follow_fixed_orientation.py # 较早的固定姿态跟随程序
+├── gemini2_camera.py              # Gemini 相机采集与对齐深度
+├── realsense_camera.py            # RealSense 相机采集
+├── rebot_adapter.py               # 机械臂控制库、运动学与 CAN 适配
+├── web_camera_preview.py          # 网页彩色画面及深度小窗
+├── config/                        # 跟随、夹爪、HOME 和标定配置
+│   ├── follow.yaml                # 通用跟随参数
+│   ├── follow_gemini336.yaml      # Gemini 336 默认叠加参数
+│   ├── grasp.yaml                 # 捏合到夹爪的映射
+│   ├── home_pose.json             # HOME 关节位置
+│   ├── joint_offset.json          # 关节零位修正
+│   ├── hand_eye_calibration.json  # 相机与末端的手眼标定
+│   └── hand_landmarker.task       # MediaPipe 手部识别模型
+├── robot_follow/                  # 主程序按职责拆分的模块
+│   ├── configuration/             # 参数加载、覆盖与校验
+│   ├── perception/                # 手掌检测、深度采样与跟踪
+│   ├── control/                   # 滤波、视觉伺服、运动学与保护
+│   ├── hardware/                  # 相机、运动学和硬件接口
+│   ├── runtime/                   # 视觉循环、HOME、反馈与遥测
+│   └── presentation/              # 本地画面和诊断展示
+├── web/                           # 本地网页、控制服务和状态显示
+│   ├── server.py                  # 网页服务与 API
+│   ├── robot_process.py           # 真机控制进程和相机预览管理
+│   ├── app.js / index.html / style.css
+│   └── README.md                  # 网页使用与数据来源说明
+├── models/wrist_camera/           # 相机模型、支架和许可证
+│   ├── gemini2-v1-level/          # 平视支架的 STEP、STL、预览与说明
+│   ├── gemini336.urdf             # Gemini 336 腕部模型
+│   ├── meshes/                    # 相机和现有支架网格
+│   └── source/  licenses/         # 原模型与许可
+├── tools/                         # 标定、诊断和回归测试入口
+├── tests/                         # 不连接真实机械臂的自动化测试
+├── docs/                          # 技术手册与历史文档
+├── requirements.txt               # 真机及视觉运行依赖
+├── requirements-test.txt          # 离线回归依赖
+└── requirements-d435i.txt         # D435i 视觉依赖
+```
+
+### 主要模块
+
+| 位置 | 职责 |
+| --- | --- |
+| [`robot_follow/perception/`](robot_follow/perception/) | 手部关键点、掌心跟踪、深度处理、相机标定检查 |
+| [`robot_follow/control/`](robot_follow/control/) | 三维目标滤波、视觉伺服、夹爪映射、运动学与桌面保护 |
+| [`robot_follow/runtime/`](robot_follow/runtime/) | 启动和 HOME、视觉循环、运行状态、反馈采样与遥测 |
+| [`robot_follow/hardware/`](robot_follow/hardware/) | 相机会话、运动学和硬件接口抽象 |
+| [`web/`](web/) | 网页控制、相机预览、机械臂状态与模型展示 |
+| [`tools/`](tools/) 和 [`tests/`](tests/) | 标定、诊断、假设备测试和回归脚本 |
 
 ## Gemini 2 V1 平视支架
 
@@ -27,9 +97,11 @@
 | [Gemini2_V1_Level_preview.png](models/wrist_camera/gemini2-v1-level/Gemini2_V1_Level_preview.png) | 修改前后及夹爪视场示意 |
 | [README.txt](models/wrist_camera/gemini2-v1-level/README.txt) | 尺寸、几何校核和来源说明 |
 
-本项目作者基于 Seeed 的 V1 模型制作了这个平视版支架，将相机固定面从约 15° 下倾调整为名义 0°，保留机械臂侧和相机侧安装接口。视场结果来自 CAD 几何校核，**尚未完成实物试装和相机画面验证**；更换支架后应核对相机安装、手眼标定及实际视野。该模型针对 Gemini 2 的尺寸与视场设计，不能直接视为已验证适配 Gemini 336。
+该平视版支架基于 Seeed 的 V1 模型，将相机固定面从约 15° 下倾调整为名义 0°，保留机械臂侧和相机侧安装接口。视场结果来自 CAD 几何校核，**尚未完成实物试装和相机画面验证**；更换支架后应核对相机安装、手眼标定及实际视野。该模型针对 Gemini 2 的尺寸与视场设计，不能直接视为已验证适配 Gemini 336。
 
 平视支架是独立提供的打印模型；当前网页及控制使用的 Gemini 336 URDF 未因添加该文件而自动更换，详见[腕部模型说明](models/wrist_camera/README.md)。
+
+![Gemini 2 V1 平视版支架与视场示意](models/wrist_camera/gemini2-v1-level/Gemini2_V1_Level_preview.png)
 
 ## 环境与安装
 
@@ -85,6 +157,44 @@ python3 web/server.py
 
 D435i 使用、手眼标定和更详细的控制说明见[技术手册](docs/技术手册.md)与[定稿技术文档](docs/B601手掌跟随系统_定稿技术文档.md)。历史文档中的参数应以当前配置和代码为准。
 
+## 配置文件与命令参数
+
+| 文件 | 作用 |
+| --- | --- |
+| [`config/follow.yaml`](config/follow.yaml) | 跟随距离、增益、速度、滤波、工作空间与日志参数 |
+| [`config/follow_gemini336.yaml`](config/follow_gemini336.yaml) | 默认 Gemini 336 运行时叠加的稳定参数 |
+| [`config/grasp.yaml`](config/grasp.yaml) | 捏合距离、夹爪开合、滤波和运动中保持设置 |
+| [`config/home_pose.json`](config/home_pose.json) | 初始化时使用的 HOME 关节位置 |
+| [`config/joint_offset.json`](config/joint_offset.json) | 关节零位修正 |
+| [`config/hand_eye_calibration.json`](config/hand_eye_calibration.json) | 相机到机械臂末端的手眼变换 |
+| `config/follow_v*_fallback.yaml` | 保留的历史参数配置，可用于对照 |
+
+默认读取 `follow.yaml`；选择 Gemini 336 且未指定自定义跟随配置时，再叠加 `follow_gemini336.yaml`。命令行参数可覆盖对应运行参数；网页选择速度档位或填写增益、速度只影响本次启动，不写入 YAML。
+
+```bash
+# 仅识别 Gemini 336 画面，不连接机械臂
+.venv-arm/bin/python palm_follow_grasp.py --camera gemini336 --no-arm
+
+# 查看可用参数
+.venv-arm/bin/python palm_follow_grasp.py --help
+```
+
+常用参数包括 `--camera`、`--distance`、`--gain`、`--gain-x`、`--max-vel`、`--fps` 和 `--follow-cfg`。`--no-arm` 只运行视觉；`--no-gripper` 关闭捏合控制；`--no-follow` 用于仅夹爪模式。后两种模式仍会连接机械臂，启动前应先检查设备和工作空间。
+
+## 标定与诊断工具
+
+| 工具 | 用途 |
+| --- | --- |
+| [`tools/teach_home.py`](tools/teach_home.py) | 示教 HOME 位置 |
+| [`tools/hand_eye_calibration_auto.py`](tools/hand_eye_calibration_auto.py) | 手眼标定采样 |
+| [`tools/handeye_joint_calib.py`](tools/handeye_joint_calib.py) | 联合计算手眼与关节零位 |
+| [`tools/auto_calibrate_d435i.py`](tools/auto_calibrate_d435i.py) | D435i / D430i 标记预览与自动标定 |
+| [`tools/gripper_j7_calibrate.py`](tools/gripper_j7_calibrate.py) | J7 夹爪开合标定 |
+| [`tools/analyze_servo_log.py`](tools/analyze_servo_log.py) | 分析伺服诊断日志 |
+| [`tools/run_regression.py`](tools/run_regression.py) | 顺序运行假设备回归 |
+
+部分标定命令会连接或驱动机械臂；运行前先阅读工具帮助和[技术手册](docs/技术手册.md)，确认现场条件。控制程序及诊断日志默认保存在本地 `logs/`，不会提交到仓库。
+
 ## 跟随与安全
 
 短时手掌丢失按原跟随逻辑做有限外推，较长时间丢失时保持；重新识别后可能自动继续。深度丢失使用原有深度冻结与超时处理。Gemini 336 桌面跟随保留关节反馈和桌面高度软件保护，详细条件见[网页说明](web/README.md)。
@@ -106,14 +216,3 @@ D435i 使用、手眼标定和更详细的控制说明见[技术手册](docs/技
 ```
 
 这些测试使用假设备，不能替代现场安装、相机标定和低速实机验证。日志保存在本地 `logs/`，默认不提交到仓库。
-
-## 目录
-
-```text
-config/                         跟随、夹爪、HOME 与标定配置
-robot_follow/                   视觉、控制、硬件与运行时模块
-web/                            本地网页与控制服务
-models/wrist_camera/            相机模型与支架文件
-tests/  tools/                  离线测试、诊断和标定工具
-docs/                           技术与历史文档
-```
