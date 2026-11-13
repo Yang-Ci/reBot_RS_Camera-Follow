@@ -144,7 +144,7 @@ if os.path.exists(_JOINT_OFFSET_FILE):
 else:
     JOINT_OFFSET = np.zeros(6)
     print("[RebotAdapter] ⚠️ 未找到 joint_offset.json，FK 将不带零位修正。"
-          "请先运行 handeye_joint_calib.py")
+          "请先核对适用于当前机械臂的零位数据")
 
 # 每关节最大速度（弧度/秒）——双保险之一（控制层也有限幅）
 # 左右跟随的速度上限 ≈ J1 限速 × 臂展，这是横向跟随的物理瓶颈。

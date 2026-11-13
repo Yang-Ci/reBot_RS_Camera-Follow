@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-手掌跟随 + 捏合抓取 一体主程序（B601 RS + Orbbec Gemini 2）
+手掌跟随 + 捏合抓取 一体主程序（B601 RS + Gemini / RealSense）
 =================================================================
 一个脚本同时实现两个功能（共用一台相机、一次 MediaPipe 检测、一条 CAN 总线）：
 
@@ -8,8 +8,7 @@
          → 目标速度前馈 + 分方向增益 → tanh 软饱和
          → 相机系速度 → 伴随变换到 TCP → 世界系 twist
          → 阻尼伪逆雅可比（可操作度奇异保护）→ 关节速度 → 适配层积分下发
-         （控制数学与 palm_follow_fixed_orientation.py 一致，
-           新增前馈/分方向增益/软饱和/反转清惯性四项高速跟随改进）
+         （包含前馈、分方向增益、软饱和与换向平滑）
 
   【抓取】拇指尖(4)—食指尖(8) 像素距离 → One Euro 滤波 → 线性映射为
          夹爪 J7 目标角度（度）→ 随 100Hz 关节指令经 rebot_control
@@ -31,8 +30,8 @@
 
 ⚠️ 首次运行前：
     1. 夹爪开合标定：tools/gripper_j7_calibrate.py（结果写入 config/grasp.yaml）
-    2. 手眼标定：tools/handeye_joint_calib.py（生成 config/hand_eye_calibration.json
-       和 config/joint_offset.json，仅跟随功能需要）
+    2. 核对相机位姿和 config/joint_offset.json；需要手眼标定时使用
+       tools/auto_calibrate_camera.py，Gemini 336 默认使用 URDF 名义位姿
     3. 先用固定假目标低速测试跟随（--gain 1.5 --max-vel 0.10），再上真人手
 """
 

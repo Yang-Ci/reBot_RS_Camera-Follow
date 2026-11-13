@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""D435i/D430i or Gemini 336 eye-in-hand calibration from the current pose.
+"""D435i/D430i, Gemini 2 or Gemini 336 eye-in-hand calibration.
 
 No hardware is accessed when importing this module. `--check` only opens the
 camera. `--run` enables the arm and automatically collects calibration poses.
@@ -254,8 +254,8 @@ def observe(camera, detector, timeout=5.0, show=True):
                      if not last_error else 'Marker invalid or too small')
             cv2.putText(canvas, label, (10, 30), cv2.FONT_HERSHEY_SIMPLEX,
                         0.6, (0, 255, 0) if not last_error else (0, 0, 255), 2)
-            cv2.imshow('D435i Auto Calibration (q = stop)', canvas)
-            if window_stopped('D435i Auto Calibration (q = stop)'):
+            cv2.imshow('Camera Auto Calibration (q = stop)', canvas)
+            if window_stopped('Camera Auto Calibration (q = stop)'):
                 raise KeyboardInterrupt
         if len(samples) >= 5:
             try:
@@ -335,7 +335,7 @@ def check_quit(robot, show):
     if getattr(robot, 'is_ros_client', False):
         if robot.process.poll() is not None:
             raise RuntimeError('ROS 标定客户端已退出')
-        if show and window_stopped('D435i Auto Calibration (q = stop)'):
+        if show and window_stopped('Camera Auto Calibration (q = stop)'):
             raise KeyboardInterrupt
         return
     arm = robot.io.arm
@@ -343,7 +343,7 @@ def check_quit(robot, show):
         raise RuntimeError('机械臂已进入停止流程')
     if getattr(arm, 'last_error', None):
         raise RuntimeError(f'控制线程错误：{arm.last_error}')
-    if show and window_stopped('D435i Auto Calibration (q = stop)'):
+    if show and window_stopped('Camera Auto Calibration (q = stop)'):
         raise KeyboardInterrupt
 
 
@@ -373,7 +373,7 @@ def main():
     mode.add_argument('--run', action='store_true', help='使能机械臂并自动采样')
     parser.add_argument('--headless', action='store_true', help='不显示画面；使用 Ctrl+C 停止')
     parser.add_argument('--ros', action='store_true', help='复用已启动的 ROS 机械臂控制器，不直接连接 CAN')
-    parser.add_argument('--camera', choices=['d435i', 'gemini336'], default='d435i', help='相机型号')
+    parser.add_argument('--camera', choices=['d435i', 'gemini2', 'gemini336'], default='d435i', help='相机型号')
     parser.add_argument('--output', type=Path, default=None, help='标定结果路径（禁止覆盖已有文件）')
     parser.add_argument('--box-min-x', type=float, default=None,
                         help='本次标定的法兰 x 坐标下限（米）；须现场确认机械臂及附件的完整运动路径')
@@ -391,8 +391,11 @@ def main():
         BOX_MIN[0] = args.box_min_x
         print(f'[范围] 本次法兰 x 下限 {BOX_MIN[0]:.3f}m；软件不检查整臂和附件碰撞', flush=True)
     if args.output is None:
-        args.output = (OUTPUT if args.camera == 'd435i'
-                       else ROOT / 'config' / 'hand_eye_calibration_gemini336.json')
+        args.output = {
+            'd435i': OUTPUT,
+            'gemini2': ROOT / 'config' / 'hand_eye_calibration.json',
+            'gemini336': ROOT / 'config' / 'hand_eye_calibration_gemini336.json',
+        }[args.camera]
     if args.preview and args.headless:
         parser.error('--preview 需要图形窗口，不能与 --headless 一起使用')
     if args.preflight and not args.ros:
@@ -409,15 +412,18 @@ def main():
         else:
             from gemini2_camera import Gemini2Camera
             camera = Gemini2Camera(fps=30, color_exposure_ms=0)
-            if 'gemini 336' not in camera.device_name.lower():
+            device_name = camera.device_name.lower()
+            if args.camera == 'gemini336' and 'gemini 336' not in device_name:
                 raise ValueError(f'所选相机为 Gemini 336，实际设备为 {camera.device_name}')
+            if args.camera == 'gemini2' and ('gemini 2' not in device_name or 'gemini 336' in device_name):
+                raise ValueError(f'所选相机为 Gemini 2，实际设备为 {camera.device_name}')
         detector = MarkerDetector(camera.camera_matrix, camera.dist_coeffs)
         if args.preview:
             print('[预览] 相机画面将持续显示；q / Esc 退出，不连接机械臂', flush=True)
             preview(camera, detector)
             return
         if not args.headless:
-            cv2.namedWindow('D435i Auto Calibration (q = stop)', cv2.WINDOW_NORMAL)
+            cv2.namedWindow('Camera Auto Calibration (q = stop)', cv2.WINDOW_NORMAL)
         first, info, usable_start = observe_start(camera, detector, show=not args.headless,
                                                   allow_small=args.run or args.preflight)
         print(f'[相机] 标记 ID=0，宽 {info.width:.1f}px，z={first[2,3]:.3f}m，'
@@ -500,7 +506,7 @@ def main():
             image_stream = 'color' if camera.has_color else 'infrared_1'
         else:
             camera_serial = camera.camera_serial
-            camera_name = 'Orbbec Gemini 336'
+            camera_name = 'Orbbec Gemini 336' if args.camera == 'gemini336' else 'Orbbec Gemini 2'
             image_stream = 'color'
         data = {'T_tcp_camera': T.tolist(), 'timestamp': datetime.now(timezone.utc).isoformat(),
                 'camera': camera_name, 'camera_serial': camera_serial,

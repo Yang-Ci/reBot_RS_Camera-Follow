@@ -1,7 +1,7 @@
 # ============================================================
 # 手掌跟随 伺服参数配置（含每个参数的调节范围标注）
 # ------------------------------------------------------------
-# palm_follow_grasp.py / palm_follow_fixed_orientation.py 启动时读取。
+# palm_follow_grasp.py 启动时读取。
 # 优先级：命令行参数 > 本文件 > 代码内置默认值。
 #   例：python palm_follow_grasp.py            → 全部用本文件
 #       python palm_follow_grasp.py --distance 0.35

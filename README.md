@@ -37,7 +37,6 @@ RGB 图像 ───────┐    手掌关键点 ── 掌心像素 ─�
 ```text
 reBot_RS_Camera-Follow/
 ├── palm_follow_grasp.py           # 手掌跟随与捏合抓取主入口
-├── palm_follow_fixed_orientation.py # 较早的固定姿态跟随程序
 ├── gemini2_camera.py              # Gemini 相机采集与对齐深度
 ├── realsense_camera.py            # RealSense 相机采集
 ├── rebot_adapter.py               # 机械臂控制库、运动学与 CAN 适配
@@ -97,9 +96,9 @@ reBot_RS_Camera-Follow/
 | [Gemini2_V1_Level_preview.png](models/wrist_camera/gemini2-v1-level/Gemini2_V1_Level_preview.png) | 修改前后及夹爪视场示意 |
 | [README.txt](models/wrist_camera/gemini2-v1-level/README.txt) | 尺寸、几何校核和来源说明 |
 
-该平视版支架基于 Seeed 的 V1 模型，将相机固定面从约 15° 下倾调整为名义 0°，保留机械臂侧和相机侧安装接口。视场结果来自 CAD 几何校核，**尚未完成实物试装和相机画面验证**；更换支架后应核对相机安装、手眼标定及实际视野。该模型针对 Gemini 2 的尺寸与视场设计，不能直接视为已验证适配 Gemini 336。
+该平视版支架基于 Seeed 的 V1 模型，将相机固定面从约 15° 下倾调整为名义 0°。支架由 Gemini 2、Gemini 336 和 D435i 共用；相机的实际固定方式、光学方向与视野应在装配后核对。预览图中的视场结果基于 Gemini 2 的 CAD 几何校核，**尚未完成实物试装和相机画面验证**，不能代表其他相机的实测视场。
 
-平视支架是独立提供的打印模型；当前网页及控制使用的 Gemini 336 URDF 未因添加该文件而自动更换，详见[腕部模型说明](models/wrist_camera/README.md)。
+平视支架是独立提供的打印模型；当前网页及控制使用的 Gemini 336 URDF 仍为原 V1 支架名义位姿，不会自动随平视支架更新。共用安装接口不代表相机位姿相同；换装前需核对变换并按实际安装重新标定，详见[腕部模型说明](models/wrist_camera/README.md)。
 
 ![Gemini 2 V1 平视版支架与视场示意](models/wrist_camera/gemini2-v1-level/Gemini2_V1_Level_preview.png)
 
@@ -166,7 +165,7 @@ D435i 使用、手眼标定和更详细的控制说明见[技术手册](docs/技
 | [`config/grasp.yaml`](config/grasp.yaml) | 捏合距离、夹爪开合、滤波和运动中保持设置 |
 | [`config/home_pose.json`](config/home_pose.json) | 初始化时使用的 HOME 关节位置 |
 | [`config/joint_offset.json`](config/joint_offset.json) | 关节零位修正 |
-| [`config/hand_eye_calibration.json`](config/hand_eye_calibration.json) | 相机到机械臂末端的手眼变换 |
+| [`config/hand_eye_calibration.json`](config/hand_eye_calibration.json) | Gemini 2 相机到机械臂末端的手眼变换 |
 | `config/follow_v*_fallback.yaml` | 保留的历史参数配置，可用于对照 |
 
 默认读取 `follow.yaml`；选择 Gemini 336 且未指定自定义跟随配置时，再叠加 `follow_gemini336.yaml`。命令行参数可覆盖对应运行参数；网页选择速度档位或填写增益、速度只影响本次启动，不写入 YAML。
@@ -186,12 +185,20 @@ D435i 使用、手眼标定和更详细的控制说明见[技术手册](docs/技
 | 工具 | 用途 |
 | --- | --- |
 | [`tools/teach_home.py`](tools/teach_home.py) | 示教 HOME 位置 |
-| [`tools/hand_eye_calibration_auto.py`](tools/hand_eye_calibration_auto.py) | 手眼标定采样 |
-| [`tools/handeye_joint_calib.py`](tools/handeye_joint_calib.py) | 联合计算手眼与关节零位 |
-| [`tools/auto_calibrate_d435i.py`](tools/auto_calibrate_d435i.py) | D435i / D430i 标记预览与自动标定 |
+| [`tools/auto_calibrate_camera.py`](tools/auto_calibrate_camera.py) | Gemini 2、Gemini 336 和 D435i / D430i 标记预览与手眼标定 |
 | [`tools/gripper_j7_calibrate.py`](tools/gripper_j7_calibrate.py) | J7 夹爪开合标定 |
 | [`tools/analyze_servo_log.py`](tools/analyze_servo_log.py) | 分析伺服诊断日志 |
 | [`tools/run_regression.py`](tools/run_regression.py) | 顺序运行假设备回归 |
+
+Gemini 336 默认使用 URDF 名义位姿，也可选择独立的实测手眼结果；Gemini 2 和 D435i 的跟随仍读取各自的手眼文件。URDF 名义位姿不能替代实装核对，也不会计算关节零位；`config/joint_offset.json` 继续用于运动学。通用标定工具支持 `--camera gemini2`、`--camera gemini336` 和 `--camera d435i`，`--preview` / `--check` 不连接机械臂，`--run` 会使能并移动机械臂；已有结果不会被覆盖。旧的手眼与关节零位联合标定程序已移除；通用工具只计算相机手眼变换，不重新计算关节零位。新生成的 Gemini 2 结果需在验证后放入其读取的 `config/hand_eye_calibration.json`；已有文件不会被自动替换。
+
+```bash
+# 只查看标记画面，不连接机械臂；型号也可选 gemini336 或 d435i
+.venv-arm/bin/python tools/auto_calibrate_camera.py --camera gemini2 --preview
+
+# 查看完整选项（--run 会驱动机械臂）
+.venv-arm/bin/python tools/auto_calibrate_camera.py --help
+```
 
 部分标定命令会连接或驱动机械臂；运行前先阅读工具帮助和[技术手册](docs/技术手册.md)，确认现场条件。控制程序及诊断日志默认保存在本地 `logs/`，不会提交到仓库。
 

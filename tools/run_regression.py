@@ -40,7 +40,7 @@ CHECKS = (
 
 
 EXTENDED_CHECKS = (
-    Check('automatic calibration (fake devices)', ('tools/test_auto_calibrate_d435i.py',)),
+    Check('automatic calibration (fake devices)', ('tools/test_auto_calibrate_camera.py',)),
     Check('browser gesture policy', ('--test', 'tools/test_webcam_control.cjs'), executable='node'),
 )
 

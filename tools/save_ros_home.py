@@ -19,7 +19,7 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / 'tools'))
-from auto_calibrate_d435i import robot_fk
+from auto_calibrate_camera import robot_fk
 from ros_calibration_client import RosCalibrationArm
 
 

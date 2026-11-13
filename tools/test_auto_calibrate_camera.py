@@ -10,7 +10,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 from scipy.spatial.transform import Rotation
-import auto_calibrate_d435i as c
+import auto_calibrate_camera as c
 
 
 def transform(rot, trans):
@@ -118,6 +118,18 @@ class CalibrationTests(unittest.TestCase):
                 c.write_result(path, {'test': 2})
             self.assertEqual(path.read_text(), old)
 
+    def test_gemini2_existing_calibration_is_not_overwritten(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'config').mkdir()
+            existing = root / 'config' / 'hand_eye_calibration.json'
+            existing.write_text('existing calibration')
+            with mock.patch.object(c, 'ROOT', root), \
+                 mock.patch.object(sys, 'argv', ['auto', '--camera', 'gemini2', '--run', '--headless']):
+                with self.assertRaises(FileExistsError):
+                    c.main()
+            self.assertEqual(existing.read_text(), 'existing calibration')
+
     def test_end_to_end_fake_hardware_and_failure_cleanup(self):
         from types import SimpleNamespace
         X = transform([.15, -.2, .3], [.03, -.04, .08])
@@ -138,12 +150,13 @@ class CalibrationTests(unittest.TestCase):
             def stop(self): self.stopped = True
         class FakeCamera:
             last = None
+            next_name = 'Orbbec Gemini 336'
             def __init__(self, **kwargs):
                 FakeCamera.last = self
                 self.camera_matrix = np.eye(3)
                 self.dist_coeffs = np.zeros(5)
                 self.width, self.height = 640, 480
-                self.device_name, self.camera_serial = 'Orbbec Gemini 336', 'fake-336'
+                self.device_name, self.camera_serial = FakeCamera.next_name, 'fake-serial-orbbec'
                 self.has_color = False
                 self.rs = SimpleNamespace(camera_info=SimpleNamespace(serial_number=1))
                 device = SimpleNamespace(get_info=lambda x: 'fake-serial')
@@ -178,9 +191,24 @@ class CalibrationTests(unittest.TestCase):
                 c.main()
             result336 = json.loads(path336.read_text())
             self.assertEqual(result336['camera'], 'Orbbec Gemini 336')
-            self.assertEqual(result336['camera_serial'], 'fake-336')
+            self.assertEqual(result336['camera_serial'], 'fake-serial-orbbec')
             self.assertEqual(result336['image_size'], [640, 480])
             self.assertEqual(result336['image_stream'], 'color')
+            FakeCamera.next_name = 'Orbbec Gemini 2'
+            FakeRobot.last = None
+            path2cam = Path(d)/'result_gemini2.json'
+            with mock.patch.object(sys, 'argv', ['auto', '--camera', 'gemini2', '--run', '--headless', '--output', str(path2cam)]):
+                c.main()
+            result2 = json.loads(path2cam.read_text())
+            self.assertEqual(result2['camera'], 'Orbbec Gemini 2')
+            self.assertEqual(result2['camera_serial'], 'fake-serial-orbbec')
+            self.assertEqual(result2['image_stream'], 'color')
+            self.assertEqual(np.asarray(result2['T_tcp_camera']).shape, (4, 4))
+            FakeCamera.next_name = 'Orbbec Gemini 336'
+            with mock.patch.object(sys, 'argv', ['auto', '--camera', 'gemini2', '--check', '--headless']):
+                with self.assertRaisesRegex(ValueError, '实际设备'):
+                    c.main()
+            self.assertTrue(FakeCamera.last.stopped)
             early_path = Path(d)/'early.json'
             FakeRobot.last = None
             count = [0]

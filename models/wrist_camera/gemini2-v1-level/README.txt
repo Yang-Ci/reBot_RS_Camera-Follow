@@ -1,7 +1,8 @@
 Gemini 2 V1 平视版支架（2026-11-13）
 
 适用来源：reBot-DevArm 的 B601 腕部相机支架 V1。
-当前校核装配：B601-RS；机械臂侧 RS / DM 共用接口保持原样。
+支架供 Gemini 2、Gemini 336 和 D435i 共用；机械臂侧 RS / DM 共用接口保持原样。
+当前视场几何校核使用 Gemini 2 与 B601-RS；各相机的实际安装和视野需实装确认。
 
 文件
 Gemini2_V1_Level.step：可编辑 CAD 实体，单位 mm。

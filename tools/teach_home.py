@@ -3,7 +3,7 @@
 HOME 位姿示教工具（B601 RS）
 ==============================
 键盘微动机械臂到一个顺手的位置，按空格保存为 config/home_pose.json。
-palm_follow_fixed_orientation.py 启动时会优先加载它作为 HOME
+palm_follow_grasp.py 启动时会加载它作为 HOME
 （初始位姿 + 硬墙自动回退位姿）。
 
 按键：
