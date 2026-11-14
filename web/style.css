@@ -12,3 +12,14 @@
 .robot-confirm{display:flex;align-items:flex-start;gap:8px;margin-top:10px;font-size:11px;line-height:1.5;color:#d8e7cb}.robot-confirm input{margin:2px 0 0;accent-color:var(--green)}.robot-confirm input:focus-visible{outline:2px solid var(--green);outline-offset:2px}
 
 .robot-controls .robot-safety-status:not(:empty){color:#f4a199;margin:8px 0}
+
+/* Desktop: keep the scene and camera preview in place while the controls scroll. */
+@media(min-width:851px){
+  .shell{height:100vh;height:100dvh;min-height:0;overflow:hidden}
+  .viewport{height:100%;min-height:0}
+  .panel{height:100%;min-height:0;overflow-y:auto;overscroll-behavior:contain}
+}
+
+#robotCameraFpsLabel{margin:10px 0 0}#robotCameraFpsLabel[hidden]{display:none}#robotCameraFpsLabel select{width:100%;margin-top:6px}#robotCameraFpsLabel span{display:block;margin-top:6px;color:var(--muted);font-size:11px}
+
+.robot-hold-setting{display:flex;align-items:flex-start;gap:8px;margin:12px 0;color:#d8e7cb;font-size:11px;line-height:1.5}.robot-hold-setting input{margin:2px 0 0;accent-color:var(--green)}.robot-hold-setting input:focus-visible{outline:2px solid var(--green);outline-offset:2px}.robot-hold-setting span{display:grid;gap:3px}.robot-hold-setting small{font-size:11px;color:var(--muted)}.robot-hold-setting:has(input:disabled){opacity:.65}

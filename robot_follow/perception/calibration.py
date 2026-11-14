@@ -45,6 +45,11 @@ def verify_orbbec_camera(camera, selected, calibration, *, require_calibration):
     """Prevent an installed 336 from silently using the old Gemini 2 calibration."""
     name = str(getattr(camera, 'device_name', ''))
     is_336 = 'gemini 336' in name.lower()
+    is_305 = 'gemini 305' in name.lower()
+    if selected == 'gemini305' and not is_305:
+        raise ValueError(f'所选相机为 Gemini 305，但实际设备为 {name or "未知"}')
+    if selected != 'gemini305' and is_305 and require_calibration:
+        raise ValueError('实际设备为 Gemini 305；请使用 --camera gemini305')
     if selected == 'gemini336' and not is_336:
         raise ValueError(f'所选相机为 Gemini 336，但实际设备为 {name or "未知"}')
     if selected == 'gemini2' and is_336 and require_calibration:

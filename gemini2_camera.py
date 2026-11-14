@@ -26,6 +26,18 @@ from pyorbbecsdk import (
 )
 
 
+def enable_gemini305_auto_exposure(device, device_name, color_exposure_ms):
+    """Restore auto exposure when the selected 305 profile requests it."""
+    if 'gemini 305' not in device_name.lower() or color_exposure_ms:
+        return
+    try:
+        from pyorbbecsdk import OBPropertyID
+        device.set_bool_property(OBPropertyID.OB_PROP_COLOR_AUTO_EXPOSURE_BOOL, True)
+        print('[Gemini 305] 已启用彩色自动曝光')
+    except Exception as exc:
+        print(f'[Gemini 305] 无法启用自动曝光：{exc}')
+
+
 class Gemini2Camera:
     def __init__(self, width=640, height=480, fps=30, align_to_color=True,
                  color_exposure_ms=0.0, serial=None):
@@ -49,7 +61,7 @@ class Gemini2Camera:
         # Gemini 2 规格：默认 Unbinned Dense 模式下 RGB 封顶 30fps；
         # 只有 Binned Sparse Default 模式才开放 深度640x400@60 + RGB 1280x720@60。
         # 代价：BS 模式深度是降采样的，精度/细节略低于默认模式。
-        if fps > 30 and 'gemini 336' not in self.device_name.lower():
+        if fps > 30 and not any(model in self.device_name.lower() for model in ('gemini 305', 'gemini 336')):
             try:
                 device = self.pipeline.get_device()
                 mode_list = device.get_depth_work_mode_list()
@@ -151,6 +163,11 @@ class Gemini2Camera:
             raise
 
     def _finish_initialization(self, color_exposure_ms):
+        # Gemini 305 persists exposure settings across process restarts. A zero
+        # setting explicitly means automatic exposure, not "leave as-is".
+        enable_gemini305_auto_exposure(self.pipeline.get_device(), self.device_name,
+                                       color_exposure_ms)
+
         # ---- 读取 RGB 相机内参（对齐后统一用 RGB 内参做反投影和标定）----
         camera_param = self.pipeline.get_camera_param()
         intr = camera_param.rgb_intrinsic   # 对齐模式下用 rgb_intrinsic
@@ -164,7 +181,16 @@ class Gemini2Camera:
         # SDK 返回的畸变系数语义与 OpenCV Brown 模型不符（实测 k1=42.6，
         # 导致 solvePnP 重投影误差 ~90px、距离错误）。该相机流实测零畸变
         # 时 PnP 与深度图完全吻合（0.27px / 0% 误差），故强制置零。
-        if "gemini 336" in self.device_name.lower():
+        if "gemini 305" in self.device_name.lower():
+            # OpenCV rational Brown-Conrady order; all six radial terms matter.
+            distortion = camera_param.rgb_distortion
+            self.dist_coeffs = np.array([distortion.k1, distortion.k2,
+                                         distortion.p1, distortion.p2,
+                                         distortion.k3, distortion.k4,
+                                         distortion.k5, distortion.k6], dtype=np.float32)
+            if not np.all(np.isfinite(self.dist_coeffs)):
+                raise ValueError("Gemini 305 彩色镜头畸变参数无效")
+        elif "gemini 336" in self.device_name.lower():
             distortion = camera_param.rgb_distortion
             self.dist_coeffs = np.array([distortion.k1, distortion.k2,
                                          distortion.p1, distortion.p2,

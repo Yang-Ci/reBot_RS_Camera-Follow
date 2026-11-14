@@ -33,6 +33,9 @@ class RuntimeBoundaryTests(unittest.TestCase):
         self.assertEqual(selected.camera, 'd435i')
         self.assertTrue(selected.no_arm)
         self.assertEqual(selected.max_vel, 0.1)
+        self.assertIsNone(defaults.stationary_joint_hold)
+        self.assertTrue(parse_args(['--stationary-joint-hold']).stationary_joint_hold)
+        self.assertFalse(parse_args(['--no-stationary-joint-hold']).stationary_joint_hold)
 
     def test_observations_do_not_share_mutable_state(self):
         first, second = TargetObservation(), TargetObservation()

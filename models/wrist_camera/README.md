@@ -7,3 +7,10 @@
 - [Gemini 2 V1 平视版支架](gemini2-v1-level/)单独提供 STEP、STL 和预览图；可供 Gemini 2、Gemini 336 和 D435i 共用，所示 Gemini 2 几何视场校核尚未实机试装。当前 `gemini336.urdf` 仍使用原 V1 网格及名义装配，未自动切换到平视版。
 
 平视版与原 V1 固定面角度不同：安装平视版后，原 V1 的 URDF 名义相机位姿不会自动更新；请核对实际装配并按需要重新标定，不能仅凭共用支架接口沿用原变换。
+
+
+## Gemini 305 居中平视支架
+
+`gemini305_centered.urdf` 为居中平视支架的名义装配。相机外壳使用近似方盒；控制用光学中心取两枚 CAD 镜片中心的中点，并非实测 RGB 光心，机械臂侧装配使用 V1 夹持接口的 CAD 到旧安装坐标的平移 `[0.20, -44.72, 34.52]` mm，光学位姿同步应用相同变换。该位姿和夹爪／支架的实际间隙均未经实机验证；不得将其视为标定结果。
+
+`meshes/D405_305_V1_Level_Centered.stl` 对应的源文件和重建程序见 `gemini305-centered/source/`，许可为 CERN-OHL-W-2.0，见 `gemini305-centered/LICENSE.txt`。原支架来自 Seeed-Projects/reBot-DevArm，Git blob `812120494a7e6145c5971e24d4d27c8e04603090`；相机光学轴位置依据 Orbbec Gemini 305 官方 CAD V1.1 的装配近似。

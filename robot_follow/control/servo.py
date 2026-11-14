@@ -15,7 +15,7 @@ from robot_follow.control.table_safety import feedback_error, limit_downward_vel
 from robot_follow.control.state import ServoState
 from robot_follow.runtime.observation import TargetObservation
 from robot_follow.runtime.control import RunControl
-from robot_follow.runtime.telemetry import LiveTelemetryPublisher
+from robot_follow.runtime.telemetry import LiveTelemetryPublisher, gripper_command_fields
 from robot_follow.hardware.interfaces import RobotControl
 from robot_follow.control.target_filter import KalmanTarget3D
 from robot_follow.control.kinematics import (compute_damped_pseudoinverse, compute_manipulability,
@@ -67,6 +67,7 @@ class ServoContext:
     pause_outside_workspace: Callable[..., Any]
     apply_stationary_joint_hold: Callable[..., Any]
     table_safety_enabled: bool = False
+    gripper_bounds: tuple = (None, None)
 
 
 @dataclass(frozen=True)
@@ -881,6 +882,7 @@ def _run_servo_loop(context: ServoContext, settings: ServoSettings):
                     feedback["actual"][joint] if feedback_fresh else "")
                 row[f"q_fb_cmd_{joint + 1}"] = (
                     feedback["command"][joint] if feedback_fresh else "")
+            row.update(gripper_command_fields(context.robot, *context.gripper_bounds))
             if context.diag_recorder is not None:
                 context.diag_recorder.log(row)
             if publish_live:

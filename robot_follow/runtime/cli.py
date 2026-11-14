@@ -19,8 +19,8 @@ def parse_args(argv=None):
                         "不传则用 follow.yaml 的 follow.gain_x")
     p.add_argument("--max-vel", type=float, default=None,
                    help="最大末端线速度 m/s；不传则用 follow.yaml 的 follow.max_vel")
-    p.add_argument("--camera", choices=["gemini2", "gemini336", "d435i"], default="gemini2",
-                   help="相机型号：gemini2（默认）、gemini336 或 d435i")
+    p.add_argument("--camera", choices=["gemini2", "gemini305", "gemini336", "d435i"], default="gemini2",
+                   help="相机型号：gemini2（默认）、gemini305、gemini336 或 d435i")
     p.add_argument("--gemini2-urdf-pose", action="store_true",
                    help="兼容旧命令：Gemini 336 使用 URDF 名义相机位姿")
     p.add_argument("--gemini336-pose", choices=["urdf", "calibration"], default="urdf",
@@ -29,6 +29,8 @@ def parse_args(argv=None):
                    help="普通 HOME 的 J3/J4 实际到位容差，范围 2~4°")
     p.add_argument("--home-speed", type=float, default=15.0, metavar="DEG_S",
                    help="普通 HOME 速度上限，范围 0~15°/s")
+    p.add_argument("--stationary-joint-hold", action=argparse.BooleanOptionalAction,
+                   default=None, help="手掌静止时保持关节指令位置；不指定时使用相机配置")
     p.add_argument("--keep-gripper-position", action="store_true",
                    help="与 --no-gripper 一起使用：保持夹爪当前位置")
     p.add_argument("--ir-emitter", choices=["auto", "on", "off"], default="auto",

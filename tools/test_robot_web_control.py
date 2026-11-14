@@ -85,6 +85,20 @@ class RobotProcessTests(unittest.TestCase):
         self.assertIsNone(self.robot.telemetry)
         self.assertFalse(self.robot.preview_path.exists())
 
+    def test_stationary_joint_hold_is_validated_forwarded_and_reported(self):
+        for value, flag in [(True, '--stationary-joint-hold'), (False, '--no-stationary-joint-hold')]:
+            with self.subTest(value=value):
+                self.robot.start(stationary_joint_hold=value)
+                self.assertIn(flag, self.robot.process.args)
+                self.assertIs(self.robot.status()['stationary_joint_hold'], value)
+                self.robot.process.returncode = 0
+                self.robot.status()
+                self.robot.process = None
+        for invalid in ('false', 1, [], {}):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                self.robot.start(stationary_joint_hold=invalid)
+        self.assertIsNone(self.robot.process)
+
     def test_medium_sets_gain_speed_and_safe_home_speed(self):
         self.robot.start('medium', False)
         args = self.robot.process.args
@@ -173,6 +187,36 @@ class RobotProcessTests(unittest.TestCase):
         self.robot.shutdown()
         self.assertEqual(self.robot.process.signals, [signal.SIGINT])
         self.assertTrue(self.robot.status()['stopping'])
+
+    def test_selected_305_is_verified_and_passed_to_controller(self):
+        with mock.patch.object(self.robot, 'cameras', return_value=[{'serial': '305', 'name': 'Orbbec Gemini 305'}]):
+            with self.assertRaises(ValueError):
+                self.robot.start(serial='other', camera='gemini305')
+            self.assertIsNone(self.robot.process)
+            with self.assertRaises(ValueError):
+                self.robot.start(serial='305', camera='gemini305', fps=90)
+            self.robot.start(serial='305', camera='gemini305', fps=60)
+        args = self.robot.process.args
+        self.assertEqual(args[args.index('--fps') + 1], '60')
+        self.assertEqual(self.robot.status()['camera_fps'], 60)
+        self.assertEqual(args[args.index('--camera') + 1], 'gemini305')
+        self.assertEqual(self.robot.process.kwargs['env']['REBOT_CAMERA_SERIAL'], '305')
+
+    def test_legacy_cameras_require_matching_device_and_pose_before_start(self):
+        for model, filename in [('gemini2', 'hand_eye_calibration.json'), ('d435i', 'hand_eye_calibration_d435i.json')]:
+            with self.subTest(model=model), mock.patch.object(self.robot, 'cameras', return_value=[{'serial': 'chosen', 'model': model}]):
+                with self.assertRaisesRegex(ValueError, '位姿文件'):
+                    self.robot.start(serial='chosen', camera=model)
+                self.assertIsNone(self.robot.process)
+                (self.project / 'config').mkdir(exist_ok=True)
+                (self.project / 'config' / filename).write_text('{}')
+                with self.assertRaises(ValueError):
+                    self.robot.start(serial='other', camera=model)
+                self.robot.start(serial='chosen', camera=model)
+                self.assertEqual(self.robot.process.args[self.robot.process.args.index('--camera') + 1], model)
+                self.robot.process.returncode = 0
+                self.robot.status()
+                self.robot.process = None
 
     def test_camera_preview_handoff_keeps_selected_camera(self):
         with mock.patch.object(self.robot, 'cameras', return_value=[{'serial': 'test336'}]):

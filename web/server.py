@@ -107,6 +107,12 @@ class Handler(SimpleHTTPRequestHandler):
                 kwargs = {}
                 if body.get('serial'):
                     kwargs['serial'] = body['serial']
+                if 'camera' in body:
+                    kwargs['camera'] = body['camera']
+                if 'fps' in body:
+                    kwargs['fps'] = body['fps']
+                if 'stationary_joint_hold' in body:
+                    kwargs['stationary_joint_hold'] = body['stationary_joint_hold']
                 if 'motion' in body:
                     kwargs['motion'] = validate_motion_settings(body['motion'])
                 result = controller.start(body.get('speed', 'slow'), body.get('gripper', False), **kwargs)

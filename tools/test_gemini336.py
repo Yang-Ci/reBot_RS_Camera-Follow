@@ -60,6 +60,17 @@ class Gemini336Tests(unittest.TestCase):
         self.assertTrue(tuned['follow']['stationary_joint_hold'])
         self.assertFalse(base['follow']['stationary_joint_hold'])
 
+    def test_305_enables_only_joint_hold_beyond_its_existing_motion_defaults(self):
+        config_dir = str(ROOT / 'config')
+        base = load_camera_follow_cfg('gemini2', None, config_dir)
+        tuned = load_camera_follow_cfg('gemini305', None, config_dir)
+        self.assertTrue(tuned['follow']['stationary_joint_hold'])
+        self.assertFalse(base['follow']['stationary_joint_hold'])
+        for key in ('kf_q', 'kf_r_xy', 'kf_r_z', 'kf_lead_ms', 'kf_lead_max_ms', 'vel_feedforward'):
+            self.assertEqual(tuned['follow'][key], base['follow'][key])
+        explicit = load_camera_follow_cfg('gemini305', str(ROOT / 'config/follow.yaml'), config_dir)
+        self.assertFalse(explicit['follow']['stationary_joint_hold'])
+
     def test_stationary_lock_holds_once_and_releases_on_motion(self):
         robot = mock.Mock()
         state = [False]

@@ -28,11 +28,26 @@
   manager.onError=()=>{failure=true;$('modelStatus').textContent='模型资源加载失败，请检查数字孪生路径';};
   manager.onLoad=()=>{if(robot&&!failure)$('modelStatus').textContent='URDF 模型已加载';};
   const armLoader=loader(manager);armLoader.packages={rebotarm_bringup:'/assets'};
-  armLoader.load('/assets/description/urdf/ReBot_Arm_RS.urdf',r=>{robot=r;robotFrame.add(r);const wrist=r.getObjectByName('gripper_end');if(wrist){const camLoader=loader(manager);camLoader.load('/model/gemini336.urdf',c=>wrist.add(c),undefined,()=>{$('modelStatus').textContent='相机模型加载失败';});}},undefined,()=>{$('modelStatus').textContent='模型加载失败，请检查数字孪生路径';});
+  let wristCameraModel = null, wristCameraRequest = 0, selectedCamera = 'gemini336';
+  function showWristCamera(model) {
+    selectedCamera = model;
+    const wrist = robot && robot.getObjectByName('gripper_end');
+    if (!wrist) return;
+    const request = ++wristCameraRequest;
+    const camLoader = loader(manager);
+    const paths = {gemini305:'/model/gemini305_centered.urdf', gemini336:'/model/gemini336.urdf', gemini2:'/assets/camera/urdf/gemini2.urdf', d435i:'/assets/camera/urdf/d435.urdf'};
+    camLoader.load(paths[model], c => {
+      if (request !== wristCameraRequest) return;
+      if (wristCameraModel) wrist.remove(wristCameraModel);
+      wristCameraModel = c; wrist.add(c);
+    }, undefined, () => { $('modelStatus').textContent = '相机模型加载失败'; });
+  }
+  armLoader.load('/assets/description/urdf/ReBot_Arm_RS.urdf',r=>{robot=r;robotFrame.add(r);showWristCamera(selectedCamera);},undefined,()=>{$('modelStatus').textContent='模型加载失败，请检查数字孪生路径';});
   let simulationJoints = WebcamControl.middle.slice(), simulationTarget = simulationJoints.slice();
   const motionSmoother = new WebcamControl.MotionSmoother(simulationJoints);
   let grip = .035, gripTarget = .035, renderAt = performance.now();
   let monitorTarget = null, monitorJoints = null;
+  let monitorGrip = null, monitorGripTarget = null;
   function render(now){
     requestAnimationFrame(render);
     const dt = Math.min(.1, Math.max(0, (now - renderAt) / 1000)); renderAt = now;
@@ -52,6 +67,13 @@
       const alpha = 1 - Math.exp(-dt / .035);
       monitorJoints = monitorJoints.map((value, i) => value + (monitorTarget[i] - value) * alpha);
       monitorJoints.forEach((value, i) => robot.setJointValue('joint' + (i + 1), value));
+    }
+    if (mode === 'monitor' && robot && monitorGripTarget !== null) {
+      if (monitorGrip === null) monitorGrip = monitorGripTarget;
+      monitorGrip += Math.max(-.08 * dt, Math.min(.08 * dt, monitorGripTarget - monitorGrip));
+      const [left, right] = WebcamControl.gripperJointValues(monitorGrip);
+      robot.setJointValue('gripper_joint1', left);
+      robot.setJointValue('gripper_joint2', right);
     }
     renderer.render(scene,camera);
   }
@@ -101,11 +123,11 @@
     if (next === 'camera' && controllerState.running) { robotMessage('请先退出真机程序，再切换网页模拟。', true); return; }
     if (next === 'monitor') stopCamera();
     mode = next;
-    monitorTarget = null; monitorJoints = null;
+    monitorTarget = null; monitorJoints = null; monitorGrip = null; monitorGripTarget = null;
     resetRealPreview();
     video.hidden = mode !== 'camera';
     $('realCameraImage').hidden = true;
-    $('previewTitle').textContent = mode === 'camera' ? '电脑摄像头' : 'GEMINI 336';
+    $('previewTitle').textContent = mode === 'camera' ? '电脑摄像头' : ({gemini2:'GEMINI 2',gemini305:'GEMINI 305',gemini336:'GEMINI 336',d435i:'REALSENSE D435i'}[selectedCamera]);
     $('cameraPlaceholder').textContent = mode === 'camera' ? '摄像头未开启' : '等待真机启动';
     $('previewStatus').textContent = mode === 'camera' ? '未开启' : '等待真机启动';
     $('modeMonitor').setAttribute('aria-pressed', String(mode === 'monitor'));
@@ -113,11 +135,11 @@
     controls.hidden = mode !== 'camera';
     $('robotControls').hidden = mode !== 'monitor';
     $('modeLabel').textContent = mode === 'camera' ? '网页模拟' : '真机控制';
-    $('modeNote').textContent = mode === 'camera' ? '模拟动作仅作用于网页模型，不发送运动命令。普通摄像头仅支持平面跟随。' : '真机按钮只控制本网页启动的程序。关节反馈可用时显示实际位置，否则显示指令位置。';
+    $('modeNote').textContent = mode === 'camera' ? '模拟动作仅作用于网页模型，不发送运动命令。普通摄像头仅支持平面跟随。' : '真机按钮只控制本网页启动的程序。关节反馈可用时显示实际位置，否则显示指令位置；夹爪模型显示目标指令，非实测。';
     if (mode === 'camera') {
       simulationTarget = WebcamControl.middle.slice(); simulationJoints = simulationTarget.slice(); motionSmoother.reset(simulationJoints);
       $('source').textContent = '电脑摄像头 · 网页模拟'; $('connection').textContent = '模拟已暂停'; $('dot').classList.remove('online');
-      $('follow').textContent = '等待摄像头'; $('palm').textContent = '—'; $('hold').textContent = '已保持';
+      $('follow').textContent = '等待摄像头'; $('palm').textContent = '—'; $('hold').textContent = '已保持'; $('gripperStatus').textContent = '模拟模式';
     } else update();
   }
   $('modeMonitor').addEventListener('click', () => chooseMode('monitor'));
@@ -219,7 +241,7 @@
     $('robotParameterHint').textContent = '参数已调整；仅在下次初始化时生效。';
     updateRobotButtons();
   });
-  for (const id of ['robotGripper', 'robotCameraDevice']) $(id).addEventListener('change', () => {
+  for (const id of ['robotGripper', 'robotCameraDevice', 'robotCameraFps', 'robotStationaryHold']) $(id).addEventListener('change', () => {
     $('robotSafetyConfirm').checked = false;
     updateRobotButtons();
   });
@@ -235,9 +257,10 @@
   function updateRobotButtons() {
     const active = controllerState.running, ready = active && controllerState.ready && !controllerState.stopping;
     const unavailable = !controllerConnected || robotActionPending;
-    $('robotStart').disabled = unavailable || !speedPresets || active || !$('robotSafetyConfirm').checked;
+    $('robotStart').disabled = unavailable || !speedPresets || active || !$('robotCameraDevice').value || !$('robotSafetyConfirm').checked;
     $('robotSpeed').disabled = unavailable || !speedPresets || active;
     $('robotGripper').disabled = unavailable || active;
+    $('robotStationaryHold').disabled = unavailable || active;
     $('robotSafetyConfirm').disabled = unavailable || active;
     for (const id of Object.values(motionFields)) $(id).disabled = unavailable || !speedPresets || active;
     $('robotFollow').disabled = unavailable || !ready || !telemetryOnline || currentFollowing || servoFault;
@@ -245,6 +268,7 @@
     $('robotStop').disabled = unavailable || !active || controllerState.stopping;
     $('modeCamera').disabled = active || robotActionPending;
     $('robotCameraDevice').disabled = unavailable || active || controllerState.preview_running;
+    $('robotCameraFps').disabled = unavailable || active;
     $('robotCameraRefresh').disabled = unavailable || active || controllerState.preview_running;
     $('robotCameraToggle').disabled = unavailable || active;
     $('robotCameraToggle').textContent = controllerState.preview_running ? '关闭摄像头' : '打开摄像头';
@@ -264,7 +288,9 @@
   $('robotStart').addEventListener('click', () => {
     for (const id of Object.values(motionFields)) if (!$(id).reportValidity()) return;
     const motion = Object.fromEntries(Object.entries(motionFields).map(([key, id]) => [key, Number($(id).value)]));
-    robotAction('start', {speed:$('robotSpeed').value, gripper:$('robotGripper').value === 'gesture', serial:$('robotCameraDevice').value || null, motion, confirm_home:$('robotSafetyConfirm').checked});
+    const model = $('robotCameraDevice').selectedOptions[0]?.dataset.model || 'gemini336';
+    const fps = model === 'gemini305' ? Number($('robotCameraFps').value) : undefined;
+    robotAction('start', {speed:$('robotSpeed').value, gripper:$('robotGripper').value === 'gesture', serial:$('robotCameraDevice').value || null, camera:model, fps, motion, stationary_joint_hold:$('robotStationaryHold').checked, confirm_home:$('robotSafetyConfirm').checked});
   });
   $('robotSafetyConfirm').addEventListener('change', updateRobotButtons);
   $('robotFollow').addEventListener('click', () => robotAction('follow', {enabled:true}));
@@ -289,10 +315,11 @@
       if (!response.ok) throw Error(data.error || '无法查找相机');
       const select = $('robotCameraDevice'), selected = select.value;
       select.replaceChildren();
-      if (!data.cameras.length) select.add(new Option('未找到 Gemini 336', ''));
-      data.cameras.forEach(camera => select.add(new Option(`${camera.name} · ${camera.serial}`, camera.serial)));
+      if (!data.cameras.length) select.add(new Option('未找到支持的相机', ''));
+      data.cameras.forEach(camera => { const option = new Option(`${camera.name} · ${camera.serial}`, camera.serial); option.dataset.model = camera.model; select.add(option); });
       if ([...select.options].some(option => option.value === selected)) select.value = selected;
-      $('robotCameraMessage').textContent = data.cameras.length ? '预览不连接机械臂，可在初始化前检查画面。' : '请连接 Gemini 336 后刷新。';
+      $('robotCameraMessage').textContent = data.cameras.length ? '预览不连接机械臂，可在初始化前检查画面。' : '请连接受支持的相机后刷新。';
+      updateSelectedCamera(); updateRobotButtons();
     } catch (error) { $('robotCameraMessage').textContent = '相机列表不可用：' + error.message; }
   }
   async function cameraPreviewAction(action) {
@@ -308,6 +335,25 @@
     } catch (error) { $('robotCameraMessage').textContent = error.message; return false; }
     finally { robotActionPending = false; updateRobotButtons(); }
   }
+  let holdDefaultModel = null;
+  function updateSelectedCamera() {
+    const model = $('robotCameraDevice').selectedOptions[0]?.dataset.model;
+    if (!model) return;
+    const name = {gemini2:'Gemini 2',gemini305:'Gemini 305',gemini336:'Gemini 336',d435i:'RealSense D435i'}[model];
+    if (!name) return;
+    if (model !== holdDefaultModel) {
+      holdDefaultModel = model;
+      $('robotStationaryHold').checked = controllerState.running && typeof controllerState.stationary_joint_hold === 'boolean'
+        ? controllerState.stationary_joint_hold : (model === 'gemini305' || model === 'gemini336');
+    }
+    if (mode === 'monitor') $('previewTitle').textContent = name.toUpperCase();
+    $('realCameraImage').alt = name + ' 实时画面';
+    $('robotCameraFpsLabel').hidden = model !== 'gemini305';
+    $('cameraName').textContent = name;
+    $('cameraMount').textContent = model === 'gemini305' ? '居中平视支架 · CAD 名义位姿' : model === 'gemini336' ? 'V1 支架 · CAD 名义位姿' : '模型为名义装配 · 跟随需核对位姿';
+    showWristCamera(model);
+  }
+  $('robotCameraDevice').addEventListener('change', updateSelectedCamera);
   $('robotCameraRefresh').addEventListener('click', refreshRobotCameras);
   $('robotCameraToggle').addEventListener('click', () => cameraPreviewAction(controllerState.preview_running ? 'stop' : 'start'));
   refreshRobotCameras();
@@ -322,6 +368,8 @@
       if (state.running && !old.running) {
         $('robotSafetyConfirm').checked = false;
         if (state.speed_mode) $('robotSpeed').value = state.speed_mode;
+        if (state.camera_fps) $('robotCameraFps').value = String(state.camera_fps);
+        if (typeof state.stationary_joint_hold === 'boolean') $('robotStationaryHold').checked = state.stationary_joint_hold;
         showMotion(state.motion_settings);
         if (!state.motion_settings) $('robotParameterHint').textContent = '当前运行的参数不可用；请查看程序日志。';
       }
@@ -390,6 +438,6 @@
   setInterval(updateRealPreview, 100);
 
   let stateRequestPending = false;
-  async function update(){if (mode !== 'monitor' || stateRequestPending) return; stateRequestPending = true; try{const res=await fetch('/api/state',{cache:'no-store'});if(!res.ok)throw Error('network');const s=await res.json();if(mode !== 'monitor')return;telemetryOnline=!!s.online;currentFollowing=!!s.following;servoFault=!!s.servo_failed;updateRobotButtons();$('dot').classList.toggle('online',s.online);$('connection').textContent=s.online?'数据更新中':'未连接';$('source').textContent=s.online?(s.source==='actual'?(s.estimated_model_joints ? `模型估算 · 数值为实际反馈（目标 ${s.feedback_rate_hz || '—'} Hz）` : '实际反馈'):s.source==='command'?'关节指令（非实测）':'等待有效关节数据'):'暂无实时数据';if(s.online && !s.model_joints && s.joints) $('source').textContent+=' · 缺少零位修正，模型未更新';$('follow').textContent=s.online?(s.phase==='home'?'正在前往 HOME':s.phase==='return'?'正在回零':s.following?'正在跟随':'等待跟随'):'等待数据';$('robotSafetyStatus').textContent=(s.online&&((!s.following&&/暂停|丢失|反馈|错误|无效|异常|超时/.test(s.error||''))||/深度估算|低速恢复/.test(s.error||'')))?s.error:'';$('palm').textContent=s.online?(s.visible?'已检测':'未检测'):'—';$('hold').textContent=s.online?(s.hold?'已保持':'未保持'):'—';if(s.online && Array.isArray(s.joints)){s.joints.forEach((v,i)=>{const deg=v*180/Math.PI;$('joint'+i).textContent=deg.toFixed(1)+'°';$('bar'+i).style.width=Math.min(100,Math.abs(deg)/180*100)+'%';});const nextModel = s.estimated_model_joints || s.model_joints;if(Array.isArray(nextModel) && nextModel.length === 6 && nextModel.every(Number.isFinite)){monitorTarget=nextModel.slice();if(!monitorJoints)monitorJoints=monitorTarget.slice();}}else{monitorTarget=null;}}catch(_){if(mode !== 'monitor')return;monitorTarget=null;telemetryOnline=false;updateRobotButtons();$('dot').classList.remove('online');$('connection').textContent='服务未连接';$('source').textContent='暂无实时数据';$('follow').textContent='等待数据';$('palm').textContent='—';$('hold').textContent='—';}finally{stateRequestPending=false;}}
+  async function update(){if (mode !== 'monitor' || stateRequestPending) return; stateRequestPending = true; try{const res=await fetch('/api/state',{cache:'no-store'});if(!res.ok)throw Error('network');const s=await res.json();if(mode !== 'monitor')return;telemetryOnline=!!s.online;monitorGripTarget=(s.online && Number.isFinite(s.gripper_open_fraction)) ? Math.max(0, Math.min(1, s.gripper_open_fraction)) * .0715 : null;$('gripperStatus').textContent=monitorGripTarget === null ? '暂无数据' : `目标 ${Math.round(s.gripper_open_fraction * 100)}%`;currentFollowing=!!s.following;servoFault=!!s.servo_failed;updateRobotButtons();$('dot').classList.toggle('online',s.online);$('connection').textContent=s.online?'数据更新中':'未连接';$('source').textContent=s.online?(s.source==='actual'?(s.estimated_model_joints ? `模型估算 · 数值为实际反馈（目标 ${s.feedback_rate_hz || '—'} Hz）` : '实际反馈'):s.source==='command'?'关节指令（非实测）':'等待有效关节数据'):'暂无实时数据';if(s.online && !s.model_joints && s.joints) $('source').textContent+=' · 缺少零位修正，模型未更新';$('follow').textContent=s.online?(s.phase==='home'?'正在前往 HOME':s.phase==='return'?'正在回零':s.following?'正在跟随':'等待跟随'):'等待数据';$('robotSafetyStatus').textContent=(s.online&&((!s.following&&/暂停|丢失|反馈|错误|无效|异常|超时/.test(s.error||''))||/深度估算|低速恢复/.test(s.error||'')))?s.error:'';$('palm').textContent=s.online?(s.visible?'已检测':'未检测'):'—';$('hold').textContent=s.online?(s.hold?'已保持':'未保持'):'—';if(s.online && Array.isArray(s.joints)){s.joints.forEach((v,i)=>{const deg=v*180/Math.PI;$('joint'+i).textContent=deg.toFixed(1)+'°';$('bar'+i).style.width=Math.min(100,Math.abs(deg)/180*100)+'%';});const nextModel = s.estimated_model_joints || s.model_joints;if(Array.isArray(nextModel) && nextModel.length === 6 && nextModel.every(Number.isFinite)){monitorTarget=nextModel.slice();if(!monitorJoints)monitorJoints=monitorTarget.slice();}}else{monitorTarget=null;}}catch(_){if(mode !== 'monitor')return;monitorTarget=null;monitorGripTarget=null;$('gripperStatus').textContent='暂无数据';telemetryOnline=false;updateRobotButtons();$('dot').classList.remove('online');$('connection').textContent='服务未连接';$('source').textContent='暂无实时数据';$('follow').textContent='等待数据';$('palm').textContent='—';$('hold').textContent='—';}finally{stateRequestPending=false;}}
   update();setInterval(update,33);
 })();

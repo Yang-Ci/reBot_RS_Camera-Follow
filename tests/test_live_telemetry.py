@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'web'))
 from live_telemetry import LiveTelemetryReceiver
 from telemetry import read_latest_state, state_from_row
-from robot_follow.runtime.telemetry import LiveTelemetryPublisher
+from robot_follow.runtime.telemetry import LiveTelemetryPublisher, gripper_command_fields
 
 
 class LiveTelemetryTests(unittest.TestCase):
@@ -65,6 +65,27 @@ class LiveTelemetryTests(unittest.TestCase):
         # Older active logs lack the explicit validity field.
         del row['q_cmd_valid']
         self.assertEqual(state_from_row(ROOT, row, 0.)['source'], 'command')
+
+    def test_gripper_command_is_normalized_and_never_mistaken_for_feedback(self):
+        robot = mock.Mock()
+        robot.get_gripper_deg.return_value = 145.2
+        fields = gripper_command_fields(robot, 5.2, 285.2)
+        row = {'fb_valid': '0', 'q_cmd_valid': '0',
+               **{k: str(v) for k, v in fields.items()}}
+        state = state_from_row(ROOT, row, 0.)
+        self.assertAlmostEqual(state['gripper_open_fraction'], .5)
+        self.assertIsNone(state['joints'])
+        robot.get_gripper_deg.assert_called_once_with()
+        for command, expected in [(1000, 1.), (-100, 0.)]:
+            row['gripper_cmd_deg'] = str(command)
+            self.assertEqual(state_from_row(ROOT, row, 0.)['gripper_open_fraction'], expected)
+        row.update(gripper_closed_deg='285.2', gripper_open_deg='5.2', gripper_cmd_deg='145.2')
+        self.assertAlmostEqual(state_from_row(ROOT, row, 0.)['gripper_open_fraction'], .5)
+        for invalid in ('nan', '', None):
+            row['gripper_cmd_deg'] = invalid
+            self.assertIsNone(state_from_row(ROOT, row, 0.)['gripper_open_fraction'])
+        self.assertEqual(gripper_command_fields(robot, 5, 5), {})
+        self.assertIsNone(state_from_row(ROOT, {'fb_valid': '0', 'q_cmd_valid': '0'}, 0.)['gripper_open_fraction'])
 
     def test_log_disappearing_during_selection_is_offline(self):
         project, directory, file = mock.MagicMock(), mock.MagicMock(), mock.MagicMock()

@@ -66,6 +66,8 @@ class RobotProcess:
         self.telemetry = None
         self.motion_settings = None
         self.speed_mode = None
+        self.camera_fps = None
+        self.stationary_joint_hold = None
 
     def cameras(self):
         python = self.project / '.venv-arm/bin/python'
@@ -75,7 +77,7 @@ class RobotProcess:
             line = next(line for line in result.stdout.splitlines() if line.startswith('CAMERA_LIST='))
             return json.loads(line.split('=', 1)[1])
         except (OSError, subprocess.SubprocessError, StopIteration, ValueError) as exc:
-            raise RuntimeError(f'无法列出 Gemini 相机: {exc}') from exc
+            raise RuntimeError(f'无法列出相机: {exc}') from exc
 
     def _camera_lock(self):
         if self.camera_lock is None:
@@ -113,9 +115,11 @@ class RobotProcess:
 
     def preview_start(self, serial):
         if not isinstance(serial, str) or not serial or len(serial) > 128:
-            raise ValueError('请选择 Gemini 336 相机')
-        if serial not in [item['serial'] for item in self.cameras()]:
+            raise ValueError('请选择相机')
+        selected = next((item for item in self.cameras() if item['serial'] == serial), None)
+        if selected is None:
             raise ValueError('所选相机不在线，请刷新列表')
+        model = selected.get('model', 'gemini336')
         with self.lock:
             if self._running() or self._other_controller():
                 raise RuntimeError('跟随程序正在使用相机')
@@ -126,7 +130,7 @@ class RobotProcess:
             try:
                 self.preview_process = subprocess.Popen(
                     [str(self.project / '.venv-arm/bin/python'), '-u',
-                     str(self.project / 'web/camera_preview_process.py'), '--preview', serial, str(self.preview_path)],
+                     str(self.project / 'web/camera_preview_process.py'), '--preview', serial, str(self.preview_path), model],
                     cwd=str(self.project), stdin=subprocess.DEVNULL,
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
             except BaseException:
@@ -191,13 +195,30 @@ class RobotProcess:
             return {'running': running, 'ready': self._ready(), 'stopping': self.stopping and running,
                     'motion_settings': self.motion_settings if running else None,
                     'speed_mode': self.speed_mode if running else None,
+                    'camera_fps': self.camera_fps if running else None,
+                    'stationary_joint_hold': self.stationary_joint_hold if running else None,
                     'preview_running': preview_running, 'preview_failed': preview_failed,
                     'exit_code': None if self.process is None else self.process.poll(),
                     'started_at': self.started_at, 'ended_at': self.ended_at, 'log': self.log_path.name if self.log_path else None}
 
-    def start(self, speed='slow', gripper=False, serial=None, motion=None):
+    def start(self, speed='slow', gripper=False, serial=None, motion=None, camera='gemini336', fps=None, stationary_joint_hold=None):
         if speed not in ('slow', 'medium', 'configured') or type(gripper) is not bool:
             raise ValueError('无效的速度或夹爪选项')
+        if camera not in ('gemini2', 'gemini305', 'gemini336', 'd435i'):
+            raise ValueError('不支持的相机型号')
+        if stationary_joint_hold is not None and type(stationary_joint_hold) is not bool:
+            raise ValueError('静止关节保持选项无效')
+        if fps is not None and (camera != 'gemini305' or type(fps) is not int or fps not in (30, 60)):
+            raise ValueError('Gemini 305 帧率仅支持 30 或 60 FPS')
+        if serial is not None or camera != 'gemini336':
+            available = self.cameras()
+            matched = next((item for item in available if item.get('serial') == serial), None)
+            if not matched or (matched.get('model') or ('gemini305' if 'gemini 305' in matched.get('name', '').lower() else 'gemini336')) != camera:
+                raise ValueError('所选设备与相机型号不一致或已离线，请刷新相机列表')
+        if camera in ('gemini2', 'd435i'):
+            calibration = 'hand_eye_calibration.json' if camera == 'gemini2' else 'hand_eye_calibration_d435i.json'
+            if not (self.project / 'config' / calibration).is_file():
+                raise ValueError(f'缺少 {camera} 相机位姿文件 config/{calibration}；请先完成并验证该相机的位姿')
         if motion is not None:
             motion = validate_motion_settings(motion)
         with self.lock:
@@ -233,8 +254,12 @@ class RobotProcess:
             self.preview_path = logs / f'.web_preview_{token}.jpg'
             self.log_path = logs / f'web_controller_{time.strftime("%Y%m%d_%H%M%S")}_{token[:6]}.log'
             args = [str(python), '-u', str(self.project / 'palm_follow_grasp.py'),
-                    '--camera', 'gemini336', '--headless', '--web-control',
+                    '--camera', camera, '--headless', '--web-control',
                     '--home-j34-tolerance', '3.5']
+            if fps is not None:
+                args += ['--fps', str(fps)]
+            if stationary_joint_hold is not None:
+                args.append('--stationary-joint-hold' if stationary_joint_hold else '--no-stationary-joint-hold')
             if not gripper:
                 args += ['--no-gripper', '--keep-gripper-position']
             if motion is not None:
@@ -265,6 +290,9 @@ class RobotProcess:
                                                     stderr=subprocess.STDOUT, start_new_session=True)
                     self.motion_settings = motion
                     self.speed_mode = speed
+                    self.camera_fps = fps
+                    self.stationary_joint_hold = (stationary_joint_hold if stationary_joint_hold is not None
+                                                  else camera in ('gemini305', 'gemini336'))
             except BaseException:
                 if self.telemetry is not None:
                     self.telemetry.close()

@@ -22,6 +22,7 @@ DIAG_FIELDS = [
     "q_act_1", "q_act_2", "q_act_3", "q_act_4", "q_act_5", "q_act_6",
     "q_fb_cmd_1", "q_fb_cmd_2", "q_fb_cmd_3", "q_fb_cmd_4", "q_fb_cmd_5",
     "q_fb_cmd_6", "hw_time_used", "error",
+    "gripper_cmd_deg", "gripper_closed_deg", "gripper_open_deg",
 ]
 
 

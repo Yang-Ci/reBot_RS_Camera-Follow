@@ -56,7 +56,7 @@ class LivePipelineTests(unittest.TestCase):
             deadline = time.monotonic() + 10
             while thread.is_alive() and time.monotonic() < deadline:
                 sample = receiver.latest()
-                if sample and sample[0].get('following') == '0':
+                if sample and sample[0].get('following') == '0' and not sample[0].get('phase'):
                     break
                 time.sleep(.02)
             thread.join(timeout=10)
@@ -65,7 +65,9 @@ class LivePipelineTests(unittest.TestCase):
         self.assertIsNotNone(sample, 'controller did not publish live telemetry')
         row, age = sample
         self.assertEqual(row['following'], '0')
-        self.assertTrue(state_from_row(ROOT, row, age)['online'])
+        state = state_from_row(ROOT, row, age)
+        self.assertTrue(state['online'])
+        self.assertIsNotNone(state['gripper_open_fraction'])
         self.assertTrue(namespace['FakeRobot'].instances[-1].stopped)
 
 

@@ -5,6 +5,7 @@ import xml.etree.ElementTree as ET
 import numpy as np
 
 DEFAULT_GEMINI2_URDF = Path('/home/robot/ReBot_Arm_DigitalTwin_RS/reBotArm_simulator-RS/public/models/wrist-cameras/urdf/gemini2.urdf')
+DEFAULT_GEMINI305_URDF = Path(__file__).resolve().parent / 'models/wrist_camera/gemini305_centered.urdf'
 DEFAULT_GEMINI336_URDF = Path(__file__).resolve().parent / 'models/wrist_camera/gemini336.urdf'
 
 
@@ -68,4 +69,9 @@ def gemini2_nominal_tcp_camera(arm_urdf, tool_offset, camera_urdf=DEFAULT_GEMINI
 
 def gemini336_nominal_tcp_camera(arm_urdf, tool_offset, camera_urdf=DEFAULT_GEMINI336_URDF):
     """TCP -> color optical frame using the shared 336 assembly URDF."""
+    return gemini2_nominal_tcp_camera(arm_urdf, tool_offset, camera_urdf)
+
+
+def gemini305_nominal_tcp_camera(arm_urdf, tool_offset, camera_urdf=DEFAULT_GEMINI305_URDF):
+    """Nominal centered, level mount; verify assembly before any movement."""
     return gemini2_nominal_tcp_camera(arm_urdf, tool_offset, camera_urdf)

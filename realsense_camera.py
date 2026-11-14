@@ -6,7 +6,7 @@ import cv2
 
 class RealSenseCamera:
     def __init__(self, width=640, height=480, fps=30, align_to_color=True,
-                 color_exposure_ms=0.0, ir_emitter="on"):
+                 color_exposure_ms=0.0, ir_emitter="on", serial=None):
         try:
             import pyrealsense2 as rs
         except ImportError as exc:
@@ -23,7 +23,13 @@ class RealSenseCamera:
         devices = rs.context().query_devices()
         if not devices:
             raise RuntimeError("未发现 RealSense 相机，请检查 USB 连接和设备权限")
-        device = devices[0]
+        device = next((d for d in devices if not serial or
+                       d.get_info(rs.camera_info.serial_number) == serial), None)
+        if device is None:
+            raise RuntimeError("所选 RealSense 相机不在线")
+        self.device_name = device.get_info(rs.camera_info.name) if serial else 'RealSense'
+        if serial and 'd435i' not in self.device_name.lower():
+            raise ValueError(f"所选设备不是 D435i: {self.device_name}")
         self.camera_serial = device.get_info(rs.camera_info.serial_number)
         config.enable_device(self.camera_serial)
         self.has_color = any(

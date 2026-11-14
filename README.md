@@ -47,7 +47,6 @@ reBot_RS_Camera-Follow/
 │   ├── grasp.yaml                 # 捏合到夹爪的映射
 │   ├── home_pose.json             # HOME 关节位置
 │   ├── joint_offset.json          # 关节零位修正
-│   ├── hand_eye_calibration.json  # 相机与末端的手眼标定
 │   └── hand_landmarker.task       # MediaPipe 手部识别模型
 ├── robot_follow/                  # 主程序按职责拆分的模块
 │   ├── configuration/             # 参数加载、覆盖与校验
@@ -142,7 +141,7 @@ git -C vendor/rebot_control checkout a901ec109ad99d7140c9b2110c618f54a9107ae9
 python3 web/server.py
 ```
 
-打开 <http://127.0.0.1:8765>。网页本身可以在不连接机械臂时打开。选择 Gemini 336 并打开相机后，可先检查画面，再选择速度、夹爪模式和参数。
+打开 <http://127.0.0.1:8765>。网页本身可以在不连接机械臂时打开。选择已连接的 Gemini 2、Gemini 305、Gemini 336 或 D435i 并打开相机后，可先检查画面，再选择速度、夹爪模式和参数。选择会同步切换对应相机模型与控制配置。Gemini 2 和 D435i 真机跟随需要与实际安装一致的手眼位姿文件；缺失时网页会阻止初始化。Gemini 305 使用居中平视支架的 CAD 名义位姿，尚未验证真机运动方向。
 
 点击“初始化真机”会使能机械臂并移动到 HOME；到位后按 `R`、点击“开始跟随”，或持续张开手掌 3 秒开始。空格暂停；`Q` / `Esc` 请求退出并回零。初始化、退出和回零都可能产生真实运动，紧急情况使用硬件急停。
 
@@ -165,7 +164,6 @@ D435i 使用、手眼标定和更详细的控制说明见[技术手册](docs/技
 | [`config/grasp.yaml`](config/grasp.yaml) | 捏合距离、夹爪开合、滤波和运动中保持设置 |
 | [`config/home_pose.json`](config/home_pose.json) | 初始化时使用的 HOME 关节位置 |
 | [`config/joint_offset.json`](config/joint_offset.json) | 关节零位修正 |
-| [`config/hand_eye_calibration.json`](config/hand_eye_calibration.json) | Gemini 2 相机到机械臂末端的手眼变换 |
 | `config/follow_v*_fallback.yaml` | 保留的历史参数配置，可用于对照 |
 
 默认读取 `follow.yaml`；选择 Gemini 336 且未指定自定义跟随配置时，再叠加 `follow_gemini336.yaml`。命令行参数可覆盖对应运行参数；网页选择速度档位或填写增益、速度只影响本次启动，不写入 YAML。
@@ -190,7 +188,7 @@ D435i 使用、手眼标定和更详细的控制说明见[技术手册](docs/技
 | [`tools/analyze_servo_log.py`](tools/analyze_servo_log.py) | 分析伺服诊断日志 |
 | [`tools/run_regression.py`](tools/run_regression.py) | 顺序运行假设备回归 |
 
-Gemini 336 默认使用 URDF 名义位姿，也可选择独立的实测手眼结果；Gemini 2 和 D435i 的跟随仍读取各自的手眼文件。URDF 名义位姿不能替代实装核对，也不会计算关节零位；`config/joint_offset.json` 继续用于运动学。通用标定工具支持 `--camera gemini2`、`--camera gemini336` 和 `--camera d435i`，`--preview` / `--check` 不连接机械臂，`--run` 会使能并移动机械臂；已有结果不会被覆盖。旧的手眼与关节零位联合标定程序已移除；通用工具只计算相机手眼变换，不重新计算关节零位。新生成的 Gemini 2 结果需在验证后放入其读取的 `config/hand_eye_calibration.json`；已有文件不会被自动替换。
+Gemini 336 默认使用 URDF 名义位姿，也可选择独立的实测手眼结果；Gemini 2 和 D435i 的真机跟随需要各自的手眼文件，仓库不提供 Gemini 2 的旧标定结果，使用前需重新标定。URDF 名义位姿不能替代实装核对，也不会计算关节零位；`config/joint_offset.json` 继续用于运动学。通用标定工具支持 `--camera gemini2`、`--camera gemini336` 和 `--camera d435i`，`--preview` / `--check` 不连接机械臂，`--run` 会使能并移动机械臂；已有结果不会被覆盖。旧的手眼与关节零位联合标定程序已移除；通用工具只计算相机手眼变换，不重新计算关节零位。新生成的 Gemini 2 结果需在验证后放入其读取的 `config/hand_eye_calibration.json`；已有文件不会被自动替换。
 
 ```bash
 # 只查看标记画面，不连接机械臂；型号也可选 gemini336 或 d435i

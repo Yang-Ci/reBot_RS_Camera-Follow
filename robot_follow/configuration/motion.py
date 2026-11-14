@@ -18,7 +18,7 @@ def resolve_motion_options(args, follow: dict) -> MotionOptions:
     depth = float(follow['distance'])
     gains = np.array([float(follow['gain_x']), float(follow['gain']), float(follow['gain'])])
     max_velocity = float(follow['max_vel'])
-    fps = 30 if args.camera == 'd435i' else int(follow['fps'])
+    fps = 30 if args.camera in ('d435i', 'gemini305') else int(follow['fps'])
     if args.distance is not None:
         if not 0.18 <= args.distance <= 0.60:
             raise ValueError('--distance 建议在 0.18~0.60 米之间（Gemini2 近距极限 ~0.15m，太远跟踪不稳）')
@@ -39,6 +39,6 @@ def resolve_motion_options(args, follow: dict) -> MotionOptions:
     if fps not in (30, 60):
         raise ValueError('跟随模式仅允许 --fps 30 或 60')
     exposure = (float(args.color_exposure) if args.color_exposure is not None
-                else 0.0 if args.camera in ('d435i', 'gemini336')
+                else 0.0 if args.camera in ('d435i', 'gemini305', 'gemini336')
                 else float(follow.get('color_exposure_ms', 0.0)))
     return MotionOptions(depth, tuple(float(value) for value in gains), max_velocity, fps, exposure)

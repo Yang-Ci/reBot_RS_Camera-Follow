@@ -46,6 +46,18 @@ def read_latest_state(project, controller):
 
 
 
+def gripper_open_fraction(row):
+    """Normalize the commanded angle using the active gripper configuration."""
+    try:
+        command, closed, opened = (float(row[k]) for k in
+            ('gripper_cmd_deg', 'gripper_closed_deg', 'gripper_open_deg'))
+        if not all(math.isfinite(x) for x in (command, closed, opened)) or closed == opened:
+            return None
+        return min(1.0, max(0.0, (command - closed) / (opened - closed)))
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return None
+
+
 def state_from_row(project, row, age):
     """Translate either a live sample or a historical CSV row for the UI."""
     try:
@@ -65,11 +77,13 @@ def state_from_row(project, row, age):
         command_valid = row.get('q_cmd_valid')
         following = row.get('following') == '1'
         phase = row.get('phase', '')
+        gripper = gripper_open_fraction(row)
         # Older logs did not include q_cmd_valid; active control was their only
         # command-validity indication. An explicit zero must never be overridden.
         usable_command = command_valid == '1' or (command_valid in (None, '') and following)
         if not actual and not usable_command:
             return {'online': True, 'source': 'unavailable', 'joints': None, 'age_s': age, 'phase': phase,
+                    'gripper_open_fraction': gripper,
                     'servo_failed': row.get('servo_failed') == '1',
                     'visible': row.get('visible') == '1', 'following': following,
                     'hold': row.get('hold_latch') == '1', 'error': row.get('error', '')}
@@ -100,6 +114,7 @@ def state_from_row(project, row, age):
             except (KeyError, TypeError, ValueError):
                 pass
         return {'online': True, 'source': source, 'joints': joints, 'phase': phase,
+                'gripper_open_fraction': gripper,
                 'servo_failed': row.get('servo_failed') == '1',
                 'model_joints': model_joints, 'age_s': age,
                 'estimated_model_joints': estimated_model_joints,

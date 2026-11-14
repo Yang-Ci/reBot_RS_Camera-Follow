@@ -206,6 +206,33 @@ main_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(main_module)
 main_module.HOME_JOINT_POS = np.zeros(6)
 
+# Use a synthetic identity calibration; the repository contains no device-specific
+# Gemini 2 result. Keep the fixture local to the imported main module.
+import io
+import json
+import builtins
+
+class FakePath:
+    def __getattr__(self, name):
+        return getattr(os.path, name)
+    def exists(self, path):
+        if str(path).endswith('/config/hand_eye_calibration.json'):
+            return True
+        return os.path.exists(path)
+
+class FakeOS:
+    path = FakePath()
+    def __getattr__(self, name):
+        return getattr(os, name)
+
+def fake_open(path, *args, **kwargs):
+    if str(path).endswith('/config/hand_eye_calibration.json'):
+        return io.StringIO(json.dumps({'T_tcp_camera': np.eye(4).tolist()}))
+    return builtins.open(path, *args, **kwargs)
+
+main_module.os = FakeOS()
+main_module.open = fake_open
+
 
 class TrackedFeedbackSampler(main_module.ActualFeedbackSampler):
     def close(self):
@@ -303,7 +330,7 @@ log_dir = os.path.join(ROOT, "logs")
 os.makedirs(log_dir, exist_ok=True)
 
 
-def run_complete_smoke(extra_args=()):
+def run_complete_smoke(extra_args=(), *, expect_feedback_fault=False):
     logs_before = {os.path.join(log_dir, name) for name in os.listdir(log_dir)
                    if name.endswith(".csv")}
     sys.argv = ["palm_follow_grasp.py", "--headless"] + list(extra_args)
@@ -311,9 +338,10 @@ def run_complete_smoke(extra_args=()):
 
     robot = FakeRobot.instances[-1]
     nonzero = [q for q in robot.commands if np.linalg.norm(q) > 1e-6]
-    assert nonzero, "跟随已启动但没有产生任何非零关节指令"
+    if not expect_feedback_fault:
+        assert nonzero, "跟随已启动但没有产生任何非零关节指令"
     final_tail = robot.commands[-15:]
-    assert len(final_tail) == 15, "控制周期数量不足，无法验证停手保持"
+    assert expect_feedback_fault or len(final_tail) == 15, "控制周期数量不足，无法验证停手保持"
     assert all(np.linalg.norm(q) < 1e-6 for q in final_tail), \
         "假目标回中心停手后，末段仍存在非零关节指令"
     assert robot.stopped, "主程序退出时没有调用统一安全停止"
@@ -326,6 +354,10 @@ def run_complete_smoke(extra_args=()):
     with open(new_logs[0], newline="", encoding="utf-8") as stream:
         rows = list(csv.DictReader(stream))
     assert len(rows) > 100, "诊断日志控制周期样本不足"
+    if expect_feedback_fault:
+        assert any('反馈' in row['error'] for row in rows), '反馈缺失必须触发保护'
+        assert all(row['following'] == '0' for row in rows if '反馈' in row['error']), '反馈保护后仍处于跟随状态'
+        return robot, rows, new_logs[0], len(nonzero), 0
     # 慢拖通道现在在世界系目标上工作，避免相机自运动误触发；
     # 激活时必须仍处于静止状态且没有额外 lead。
     slow_rows = [row for row in rows if row["slow_active"] == "1"]
@@ -364,9 +396,9 @@ print(f"OFFLINE_FEEDBACK_OK: samples={len(feedback_times)}, "
       f"commands={len(robot.commands)}, nonzero={nonzero_count}, "
       f"final_static_zero=15, slow_rows={slow_count}, log={log_path}")
 
-# 场景二：连续 CAN 反馈故障只能停用诊断，不得污染控制误差或安全退出。
+# 场景二：连续 CAN 反馈故障必须暂停跟随并安全退出。
 FakeRobot.fail_feedback = True
-fault_robot, fault_rows, fault_log, fault_nonzero, _ = run_complete_smoke()
+fault_robot, fault_rows, fault_log, fault_nonzero, _ = run_complete_smoke(expect_feedback_fault=True)
 assert fault_robot.feedback_calls >= 3, "反馈故障注入未实际执行"
 assert not any(row["fb_valid"] == "1" for row in fault_rows), \
     "连续故障后旧实际反馈仍被标为有效"

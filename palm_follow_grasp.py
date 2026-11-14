@@ -124,7 +124,7 @@ def load_follow_cfg(path):
 
 
 def load_camera_follow_cfg(camera, explicit_path, config_dir):
-    """默认只为 Gemini 336 叠加独立参数；显式配置始终优先。"""
+    """按相机叠加默认参数；显式配置始终优先。"""
     cfg = load_follow_cfg(explicit_path or os.path.join(config_dir, 'follow.yaml'))
     if camera == 'gemini336' and explicit_path is None:
         profile_path = os.path.join(config_dir, 'follow_gemini336.yaml')
@@ -132,6 +132,10 @@ def load_camera_follow_cfg(camera, explicit_path, config_dir):
             profile = yaml.safe_load(f) or {}
         cfg['follow'].update(profile.get('follow', {}))
         print(f'[配置] Gemini 336 静止稳定参数: {profile_path}', flush=True)
+    if camera == 'gemini305' and explicit_path is None:
+        cfg['follow'].update({'gain': 1.5, 'gain_x': 1.5, 'max_vel': 0.10,
+                              'stationary_joint_hold': True})
+        print('[配置] Gemini 305 默认跟随参数（默认 30 FPS、自动曝光）', flush=True)
     return cfg
 
 
@@ -177,6 +181,8 @@ def _run(resources):
     if args.gemini2_urdf_pose and args.gemini336_pose == 'calibration':
         raise ValueError('--gemini2-urdf-pose 不能与 calibration 同时使用')
     use_336_urdf = args.camera == 'gemini336' and args.gemini336_pose == 'urdf'
+    use_305_urdf = args.camera == 'gemini305'
+    use_nominal_urdf = use_336_urdf or use_305_urdf
     if not np.isfinite(args.home_j34_tolerance) or not 2 <= args.home_j34_tolerance <= 4:
         raise ValueError('--home-j34-tolerance 必须在 2~4° 内')
     if not np.isfinite(args.home_speed) or not 0 < args.home_speed <= 15:
@@ -203,7 +209,10 @@ def _run(resources):
     # 跟随参数：yaml 为默认值，命令行参数优先级更高
     config_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config')
     follow_cfg = load_camera_follow_cfg(args.camera, args.follow_cfg, config_dir)
+    if args.stationary_joint_hold is not None:
+        follow_cfg['follow']['stationary_joint_hold'] = args.stationary_joint_hold
     validate_follow_cfg(follow_cfg)
+    print(f"[配置] 静止关节保持：{'开启' if follow_cfg['follow']['stationary_joint_hold'] else '关闭'}", flush=True)
     runtime_config = copy.deepcopy(_legacy_follow_config)
     runtime_config.apply_follow_cfg(follow_cfg)
     fcfg = follow_cfg["follow"]
@@ -252,11 +261,12 @@ def _run(resources):
     # ── 手眼标定（仅跟随模式需要）──
     T_tcp_camera = None
     calibration_data = None
-    if follow_enabled and not args.no_arm and use_336_urdf:
+    if follow_enabled and not args.no_arm and use_nominal_urdf:
         from rebot_adapter import URDF_PATH
-        from urdf_camera_pose import gemini336_nominal_tcp_camera
-        T_tcp_camera = gemini336_nominal_tcp_camera(URDF_PATH, runtime_config.tool_offset)
-        print('[相机位姿] 使用 Gemini 336 V1 支架 CAD 名义位姿（未实测验证）；请核对实际安装和运动方向', flush=True)
+        from urdf_camera_pose import gemini305_nominal_tcp_camera, gemini336_nominal_tcp_camera
+        pose = gemini305_nominal_tcp_camera if use_305_urdf else gemini336_nominal_tcp_camera
+        T_tcp_camera = pose(URDF_PATH, runtime_config.tool_offset)
+        print(f'[相机位姿] {args.camera} 使用支架 CAD 名义位姿（未实测验证）；请核对实际安装和运动方向', flush=True)
         print(T_tcp_camera, flush=True)
     elif follow_enabled and not args.no_arm:
         calib_name = {"d435i": "hand_eye_calibration_d435i.json",
@@ -278,7 +288,7 @@ def _run(resources):
         from gemini2_camera import Gemini2Camera as Camera
     print(f"初始化 {args.camera} 相机（{camera_fps} fps）...")
     camera_kwargs = dict(fps=camera_fps, color_exposure_ms=color_exposure_ms)
-    if args.web_control and args.camera == 'gemini336' and os.environ.get('REBOT_CAMERA_SERIAL'):
+    if args.web_control and args.camera in ('gemini2', 'gemini305', 'gemini336', 'd435i') and os.environ.get('REBOT_CAMERA_SERIAL'):
         camera_kwargs['serial'] = os.environ['REBOT_CAMERA_SERIAL']
     if args.camera == "d435i":
         camera_kwargs["ir_emitter"] = ("off" if args.ir_emitter == "off" or
@@ -290,7 +300,7 @@ def _run(resources):
         else:
             verify_orbbec_camera(camera, args.camera, calibration_data,
                                  require_calibration=(follow_enabled and not args.no_arm
-                                                      and not use_336_urdf))
+                                                      and not use_nominal_urdf))
 
     camera_session = CameraSession(lambda: Camera(**camera_kwargs), validate_camera)
     resources.camera = camera_session
@@ -298,7 +308,7 @@ def _run(resources):
     fx, fy, cx, cy = cam.fx, cam.fy, cam.cx, cam.cy
 
     def project_pixel(u, v, depth):
-        if args.camera in ("d435i", "gemini336"):
+        if args.camera in ("d435i", "gemini305", "gemini336"):
             xy = cv2.undistortPoints(np.array([[[u, v]]], dtype=np.float64),
                                      camera_session.camera.camera_matrix,
                                      camera_session.camera.dist_coeffs)[0, 0]
@@ -371,7 +381,8 @@ def _run(resources):
                 if live_publisher is not None:
                     live_publisher.start()
                     resources.live_publisher = live_publisher
-                    resources.phase_telemetry = PhaseTelemetry(robot, live_publisher).start()
+                    resources.phase_telemetry = PhaseTelemetry(robot, live_publisher,
+                        gripper_bounds=(gripper_closed_deg, gripper_open_deg)).start()
                     resources.phase_telemetry.set_phase('home')
             except (OSError, ValueError, RuntimeError) as exc:
                 print(f'[网页] 实时状态不可用: {exc}', flush=True)
@@ -539,15 +550,15 @@ def _run(resources):
             diag_recorder = None
     feedback_sampler = None
     feedback_hz = 2.0 if near_limit_home else runtime_config.diag_actual_feedback_hz
-    if args.camera == 'gemini336':
+    if args.camera in ('gemini2', 'gemini305', 'gemini336', 'd435i'):
         feedback_hz = 5.0
-    if robot is not None and (args.camera == 'gemini336' or near_limit_home or ((diag_recorder is not None or live_publisher is not None) and feedback_hz > 0.0)):
+    if robot is not None and (args.camera in ('gemini2', 'gemini305', 'gemini336', 'd435i') or near_limit_home or ((diag_recorder is not None or live_publisher is not None) and feedback_hz > 0.0)):
         try:
             feedback_sampler = ActualFeedbackSampler(
-                robot, hz=feedback_hz, paced=(args.camera == 'gemini336')).start()
+                robot, hz=feedback_hz, paced=(args.camera in ('gemini2', 'gemini305', 'gemini336', 'd435i'))).start()
             resources.feedback_sampler = feedback_sampler
             print(f"[反馈] 实际关节采样 {feedback_hz:.1f}Hz"
-                  + ('，用于桌面保护' if args.camera == 'gemini336'
+                  + ('，用于桌面保护' if args.camera in ('gemini2', 'gemini305', 'gemini336', 'd435i')
                      else '，用于近限位保护' if near_limit_home else '（仅诊断）'))
         except Exception as exc:
             print(f"[诊断] 实际关节采样启动失败，已禁用: {exc}")
@@ -588,7 +599,8 @@ def _run(resources):
             compute_tcp_fk_and_jacobian=compute_tcp_fk_and_jacobian,
             pause_outside_workspace=pause_runtime_workspace,
             apply_stationary_joint_hold=apply_stationary_joint_hold,
-            table_safety_enabled=(args.camera == 'gemini336'),
+            table_safety_enabled=(args.camera in ('gemini2', 'gemini305', 'gemini336', 'd435i')),
+            gripper_bounds=(gripper_closed_deg, gripper_open_deg),
         )
         servo_settings = ServoSettings.from_configuration(runtime_config)
         if resources.phase_telemetry is not None:
