@@ -240,6 +240,8 @@ class PhaseTelemetryTests(unittest.TestCase):
         rows = []
         robot = FakeRobot()
         robot.get_gripper_deg = lambda: 145.2
+        robot.get_gripper_command_deg = lambda: robot.gripper_command
+        robot.gripper_command = 145.2
         publisher = types.SimpleNamespace(offer=rows.append)
         phase = PhaseTelemetry(robot, publisher, period=.005, gripper_bounds=(5.2, 285.2)).start()
         try:
@@ -248,6 +250,7 @@ class PhaseTelemetryTests(unittest.TestCase):
             boundary = len(rows); time.sleep(.02)
             self.assertEqual(len(rows), boundary)
             robot.q[:] = 1.
+            robot.gripper_command = 35.2
             phase.set_phase('return'); time.sleep(.03)
         finally:
             phase.close()
@@ -256,7 +259,7 @@ class PhaseTelemetryTests(unittest.TestCase):
         self.assertTrue(returns)
         self.assertEqual(returns[-1]['q_cmd_1'], 1.)
         self.assertEqual(returns[-1]['fb_valid'], 0)
-        self.assertEqual(returns[-1]['gripper_cmd_deg'], 145.2)
+        self.assertEqual(returns[-1]['gripper_cmd_deg'], 35.2)
         self.assertEqual(returns[-1]['gripper_open_deg'], 285.2)
 
 

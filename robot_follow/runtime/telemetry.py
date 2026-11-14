@@ -81,10 +81,10 @@ class LiveTelemetryPublisher:
         self._thread.join(timeout=1.0)
 
 
-def gripper_command_fields(robot, closed_deg, open_deg):
-    """Snapshot the cached target only; never issue an additional CAN read."""
+def gripper_command_fields(robot, closed_deg, open_deg, *, phase=False):
+    """Snapshot the target, or the phase command, without an extra CAN read."""
     try:
-        command = float(robot.get_gripper_deg())
+        command = float(robot.get_gripper_command_deg() if phase else robot.get_gripper_deg())
         closed, opened = float(closed_deg), float(open_deg)
         if not all(math.isfinite(x) for x in (command, closed, opened)) or closed == opened:
             return {}
@@ -127,7 +127,7 @@ class PhaseTelemetry:
                                'q_cmd_valid': 1, 'fb_valid': 0,
                                'following': 0, 'visible': 0, 'hold_latch': 0}
                         row.update({f'q_cmd_{i + 1}': q for i, q in enumerate(joints)})
-                        row.update(gripper_command_fields(self.robot, *self.gripper_bounds))
+                        row.update(gripper_command_fields(self.robot, *self.gripper_bounds, phase=True))
                         # A phase transition may occur while reading angles.
                         # Never publish a stale HOME sample after servo starts.
                         with self._lock:

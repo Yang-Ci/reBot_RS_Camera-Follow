@@ -309,6 +309,10 @@ class RebotAdapter:
         return np.deg2rad(np.array(self.io.arm.get_command_angles()[:6],
                                    dtype=np.float64))
 
+    def get_gripper_command_deg(self):
+        """返回控制器当前下发的夹爪角度（度），不触发 CAN 读取。"""
+        return float(self.io.arm.get_command_angles()[6])
+
     # ── 运动指令 ─────────────────────────────────────────────
     def joint_vel_cmd(self, dq_rad):
         """
