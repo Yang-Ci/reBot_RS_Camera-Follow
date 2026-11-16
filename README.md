@@ -6,11 +6,11 @@
 
 感谢 [TonyWeyyy / Rebot_B601_RS_CV_Control](https://github.com/TonyWeyyy/Rebot_B601_RS_CV_Control) 提供的思路。
 
-机械臂控制使用 [LAN-GER / rebot_control](https://github.com/LAN-GER/rebot_control)；网页模型使用 [Yang-Ci / ReBot_Arm_DigitalTwin_RS](https://github.com/Yang-Ci/ReBot_Arm_DigitalTwin_RS) 的数字孪生资源。相机支架来源及许可见[支架说明](models/wrist_camera/gemini2-v1-level/README.txt)和[模型说明](models/wrist_camera/README.md)。
+机械臂控制使用 [LAN-GER / rebot_control](https://github.com/LAN-GER/rebot_control)；网页模型使用 [Yang-Ci / ReBot_Arm_DigitalTwin_RS](https://github.com/Yang-Ci/ReBot_Arm_DigitalTwin_RS) 的数字孪生资源。相机支架来源及许可见[支架说明](models/wrist_camera/gemini2-gemini336-d435i/README.txt)和[模型说明](models/wrist_camera/README.md)。
 
 ## 功能
 
-- 支持 Gemini 2、Gemini 336 和 RealSense D435i 的手掌视觉跟随；相机和机械臂的适配要求见下方说明。
+- 支持 Orbbec Gemini 2、Orbbec Gemini 305、Orbbec Gemini 336 和 RealSense D435i 的手掌视觉跟随；相机和机械臂的适配要求见下方说明。
 - 通过手部关键点和深度图获取三维掌心位置，经过滤波、坐标变换和运动学计算生成机械臂指令。
 - 支持拇指、食指捏合控制夹爪，也可以选择保持夹爪当前位置。
 - 本地网页可预览相机与深度图、显示关节状态和三维模型，并调整跟随增益及速度。
@@ -63,7 +63,7 @@ reBot_RS_Camera-Follow/
 ├── assets/                        # RS 机械臂和腕部相机模型资源
 ├── vendor/rebot_control/          # 集成的机械臂控制器
 ├── models/wrist_camera/           # 相机模型、支架和许可证
-│   ├── gemini2-v1-level/          # 平视支架的 STEP、STL、预览与说明
+│   ├── gemini2-gemini336-d435i/          # 平视支架的 STEP、STL、预览与说明
 │   ├── gemini336.urdf             # Gemini 336 腕部模型
 │   ├── meshes/                    # 相机和现有支架网格
 │   └── source/  licenses/         # 原模型与许可
@@ -86,22 +86,26 @@ reBot_RS_Camera-Follow/
 | [`web/`](web/) | 网页控制、相机预览、机械臂状态与模型展示 |
 | [`tools/`](tools/) 和 [`tests/`](tests/) | 标定、诊断、假设备测试和回归脚本 |
 
-## Gemini 2 V1 平视支架
+## 相机共用平视支架
 
-[支架文件夹](models/wrist_camera/gemini2-v1-level/)包含四个文件：
+[支架文件夹](models/wrist_camera/gemini2-gemini336-d435i/)包含四个文件：
 
 | 文件 | 用途 |
 | --- | --- |
-| [Gemini2_V1_Level.step](models/wrist_camera/gemini2-v1-level/Gemini2_V1_Level.step) | 可编辑 CAD 模型，单位 mm |
-| [Gemini2_V1_Level.stl](models/wrist_camera/gemini2-v1-level/Gemini2_V1_Level.stl) | 可切片的打印模型，单位 mm |
-| [Gemini2_V1_Level_preview.png](models/wrist_camera/gemini2-v1-level/Gemini2_V1_Level_preview.png) | 修改前后及夹爪视场示意 |
-| [README.txt](models/wrist_camera/gemini2-v1-level/README.txt) | 尺寸、几何校核和来源说明 |
+| [Gemini2_Gemini336_D435i_Mount.step](models/wrist_camera/gemini2-gemini336-d435i/Gemini2_Gemini336_D435i_Mount.step) | 可编辑 CAD 模型，单位 mm |
+| [Gemini2_Gemini336_D435i_Mount.stl](models/wrist_camera/gemini2-gemini336-d435i/Gemini2_Gemini336_D435i_Mount.stl) | 可切片的打印模型，单位 mm |
+| [Gemini2_Gemini336_D435i_Mount_preview.png](models/wrist_camera/gemini2-gemini336-d435i/Gemini2_Gemini336_D435i_Mount_preview.png) | 由 STL 生成的支架多视角预览 |
+| [README.txt](models/wrist_camera/gemini2-gemini336-d435i/README.txt) | 尺寸、几何校核和来源说明 |
 
-该平视版支架基于 Seeed 的 V1 模型，将相机固定面从约 15° 下倾调整为名义 0°。支架由 Gemini 2、Gemini 336 和 D435i 共用；相机的实际固定方式、光学方向与视野应在装配后核对。预览图中的视场结果基于 Gemini 2 的 CAD 几何校核，**尚未完成实物试装和相机画面验证**，不能代表其他相机的实测视场。
+该平视版支架基于 Seeed 的原始模型，将相机固定面从约 15° 下倾调整为名义 0°。支架由 Gemini 2、Gemini 336 和 D435i 共用；相机的实际固定方式、光学方向与视野应在装配后核对。Gemini 2 的视场结果基于 CAD 几何校核，**尚未完成实物试装和相机画面验证**，不能代表其他相机的实测视场。
 
-Gemini 2、D435i 和 Gemini 336 共用 V1 平视支架，网页和跟随程序使用各自对应的平视版 URDF；相机光学中心按型号分别设置。模型使用 CAD 名义装配，实际安装应在首次运行前核对，详见[腕部模型说明](models/wrist_camera/README.md)。
+Gemini 2、D435i 和 Gemini 336 共用平视支架，网页和跟随程序使用各自对应的平视版 URDF；相机光学中心按型号分别设置。模型使用 CAD 名义装配，实际安装应在首次运行前核对，详见[腕部模型说明](models/wrist_camera/README.md)。
 
-![Gemini 2 V1 平视版支架与视场示意](models/wrist_camera/gemini2-v1-level/Gemini2_V1_Level_preview.png)
+![Gemini 2、Gemini 336 和 D435i 支架预览](models/wrist_camera/gemini2-gemini336-d435i/Gemini2_Gemini336_D435i_Mount_preview.png)
+
+Gemini 305 和 D405 使用另一款[共用支架](models/wrist_camera/meshes/Gemini305_D405_Mount.stl)：
+
+![Gemini 305 和 D405 支架预览](models/wrist_camera/gemini305-d405/Gemini305_D405_Mount_preview.png)
 
 ## 环境与安装
 
@@ -187,7 +191,7 @@ D435i 使用、手眼标定和更详细的控制说明见[技术手册](docs/技
 | [`tools/analyze_servo_log.py`](tools/analyze_servo_log.py) | 分析伺服诊断日志 |
 | [`tools/run_regression.py`](tools/run_regression.py) | 顺序运行假设备回归 |
 
-Gemini 2、D435i、Gemini 305 和 Gemini 336 默认使用各自 URDF 的名义相机位姿，无需手眼标定文件。Gemini 2、D435i 与 Gemini 336 使用对应的 V1 平视版模型；D435i 根据当前彩色或红外图像选择光学坐标。URDF 位姿须与实际支架和相机安装一致；它不计算关节零位，`config/joint_offset.json` 继续用于运动学。通用手眼标定工具是可选诊断工具，`--run` 会使能并移动机械臂；已有结果不会被覆盖。
+Gemini 2、D435i、Gemini 305 和 Gemini 336 默认使用各自 URDF 的名义相机位姿，无需手眼标定文件。Gemini 2、D435i 与 Gemini 336 使用对应的平视版模型；D435i 根据当前彩色或红外图像选择光学坐标。URDF 位姿须与实际支架和相机安装一致；它不计算关节零位，`config/joint_offset.json` 继续用于运动学。通用手眼标定工具是可选诊断工具，`--run` 会使能并移动机械臂；已有结果不会被覆盖。
 
 ```bash
 # 只查看标记画面，不连接机械臂；型号也可选 gemini336 或 d435i

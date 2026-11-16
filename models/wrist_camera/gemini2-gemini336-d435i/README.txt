@@ -1,14 +1,14 @@
-Gemini 2 V1 平视版支架（2026-11-13）
+Gemini 2 / Gemini 336 / D435i 共用平视支架（2026-11-13）
 
 适用来源：reBot-DevArm 的 B601 腕部相机支架 V1。
 支架供 Gemini 2、Gemini 336 和 D435i 共用；机械臂侧 RS / DM 共用接口保持原样。
 当前视场几何校核使用 Gemini 2 与 B601-RS；各相机的实际安装和视野需实装确认。
 
 文件
-Gemini2_V1_Level.step：可编辑 CAD 实体，单位 mm。
-Gemini2_V1_Level.stl：用于切片的封闭三角网格，单位 mm。
-Gemini2_V1_Level_preview.png：修改前后及 RS 夹爪视场对比图。
-原 V1 模型归档在上级 source/D435_Gemini2_Mount_V1.step。
+Gemini2_Gemini336_D435i_Mount.step：可编辑 CAD 实体，单位 mm。
+Gemini2_Gemini336_D435i_Mount.stl：用于切片的封闭三角网格，单位 mm。
+Gemini2_Gemini336_D435i_Mount_preview.png：由 STL 模型生成的多视角支架预览图。
+原 V1 模型归档在上级 source/Gemini2_D435i_Mount_Original.step。
 
 修改内容
 原 V1 相机固定面下倾约 14.99982°，现调整为相对夹持接口基准的名义 0°。

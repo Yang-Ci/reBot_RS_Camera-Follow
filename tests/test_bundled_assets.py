@@ -42,6 +42,22 @@ class BundledAssetsTests(unittest.TestCase):
                      'config/rebotarm_rs.yaml'):
             self.assertTrue((ROOT / 'vendor/rebot_control' / name).is_file())
 
+    def test_wrist_camera_urdf_meshes_exist(self):
+        root = ROOT / 'models/wrist_camera'
+        for name in ('gemini2_level.urdf', 'gemini305_centered.urdf',
+                     'gemini336_level.urdf', 'd435i_level.urdf', 'gemini336.urdf'):
+            path = root / name
+            for mesh in ET.parse(path).iter('mesh'):
+                uri = mesh.attrib['filename']
+                if uri.startswith('package://rebot_mount/'):
+                    target = root / uri.removeprefix('package://rebot_mount/')
+                elif uri.startswith('package://twin_camera/'):
+                    target = ROOT / 'assets/wrist-cameras' / uri.removeprefix('package://twin_camera/')
+                else:
+                    target = root / uri
+                with self.subTest(urdf=name, mesh=uri):
+                    self.assertTrue(target.is_file(), str(target))
+
 
 if __name__ == '__main__':
     unittest.main()

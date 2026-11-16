@@ -1,4 +1,4 @@
-"""Local D405 / Gemini 305 V1 centered level-view modification, 2026-11-13.
+"""D405 / Gemini 305 centered level-view mount modification, 2026-11-13.
 
 Requires cadquery==2.5.2. Units: mm. Run from any working directory.
 Derived from Seeed-Projects/reBot-DevArm; CERN-OHL-W-2.0.
@@ -32,7 +32,7 @@ def cut_face(shape, y):
 
 
 def build():
-    original = cq.importers.importStep(str(SOURCE/'original_V1.step')).val()
+    original = cq.importers.importStep(str(SOURCE/'original_mount.step')).val()
     seat = [face for face in original.Faces()
             if face.geomType() == 'PLANE' and face.Area() > 1500
             and face.normalAt().z > .8 and face.normalAt().y < -.1]
@@ -86,7 +86,7 @@ def build():
         'units': 'mm',
         'source_repository': 'https://github.com/Seeed-Projects/reBot-DevArm',
         'source_blob_sha': '812120494a7e6145c5971e24d4d27c8e04603090',
-        'source_sha256': hashlib.sha256((SOURCE/'original_V1.step').read_bytes()).hexdigest(),
+        'source_sha256': hashlib.sha256((SOURCE/'original_mount.step').read_bytes()).hexdigest(),
         'original_nominal_downward_pitch_deg': -angle,
         'new_nominal_downward_pitch_deg': 0.0,
         'rotation_about_CAD_X_deg': angle,
@@ -110,9 +110,9 @@ def build():
 
 if __name__ == '__main__':
     original, result, report = build()
-    cq.exporters.export(result, str(OUTPUT/'D405_305_V1_Level_Centered.step'))
-    cq.exporters.export(result, str(OUTPUT/'D405_305_V1_Level_Centered.stl'), tolerance=.05, angularTolerance=.1)
-    check = cq.importers.importStep(str(OUTPUT/'D405_305_V1_Level_Centered.step')).val()
+    cq.exporters.export(result, str(OUTPUT/'Gemini305_D405_Mount.step'))
+    cq.exporters.export(result, str(OUTPUT/'Gemini305_D405_Mount.stl'), tolerance=.05, angularTolerance=.1)
+    check = cq.importers.importStep(str(OUTPUT/'Gemini305_D405_Mount.step')).val()
     assert check.isValid() and len(check.Solids()) == 1
     assert abs(check.Volume()-result.Volume()) < .001
     (OUTPUT/'geometry_check.json').write_text(json.dumps(report, indent=2)+'\n')

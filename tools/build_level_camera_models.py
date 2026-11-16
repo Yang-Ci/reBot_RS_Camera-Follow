@@ -22,7 +22,7 @@ def replace_mount(urdf):
     visual.find('origin').set('xyz','0.0002 -0.04472 0.03452')
     visual.find('origin').set('rpy','0 0 0')
     mesh=visual.find('geometry/mesh')
-    mesh.set('filename','package://rebot_mount/gemini2-v1-level/Gemini2_V1_Level.stl')
+    mesh.set('filename','package://rebot_mount/gemini2-gemini336-d435i/Gemini2_Gemini336_D435i_Mount.stl')
     mesh.set('scale','0.001 0.001 0.001')
 
 def save(urdf,path):

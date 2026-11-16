@@ -1,6 +1,7 @@
 (() => {
   'use strict';
   const $ = id => document.getElementById(id);
+  const CAMERA_NAMES = Object.freeze({gemini2:'Orbbec Gemini 2', gemini305:'Orbbec Gemini 305', gemini336:'Orbbec Gemini 336', d435i:'RealSense D435i'});
   $('joints').innerHTML = Array.from({length: 6}, (_, i) => `<div class="joint"><span>J0${i+1}</span><div class="bar"><i id="bar${i}"></i></div><b id="joint${i}">—</b></div>`).join('');
   const host = $('scene'), scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(38, 1, .01, 100);
@@ -132,7 +133,7 @@
     resetRealPreview();
     video.hidden = mode !== 'camera';
     $('realCameraImage').hidden = true;
-    $('previewTitle').textContent = mode === 'camera' ? '电脑摄像头' : ({gemini2:'GEMINI 2',gemini305:'GEMINI 305',gemini336:'GEMINI 336',d435i:'REALSENSE D435i'}[selectedCamera]);
+    $('previewTitle').textContent = mode === 'camera' ? '电脑摄像头' : CAMERA_NAMES[selectedCamera];
     $('cameraPlaceholder').textContent = mode === 'camera' ? '摄像头未开启' : '等待真机启动';
     $('previewStatus').textContent = mode === 'camera' ? '未开启' : '等待真机启动';
     $('modeMonitor').setAttribute('aria-pressed', String(mode === 'monitor'));
@@ -395,7 +396,7 @@
       const select = $('robotCameraDevice'), selected = select.value;
       select.replaceChildren();
       if (!data.cameras.length) select.add(new Option('未找到支持的相机', ''));
-      data.cameras.forEach(camera => { const option = new Option(`${camera.name} · ${camera.serial}`, camera.serial); option.dataset.model = camera.model; select.add(option); });
+      data.cameras.forEach(camera => { const option = new Option(`${CAMERA_NAMES[camera.model] || camera.name} · ${camera.serial}`, camera.serial); option.dataset.model = camera.model; select.add(option); });
       if ([...select.options].some(option => option.value === selected)) select.value = selected;
       $('robotCameraMessage').textContent = data.cameras.length ? '预览不连接机械臂，可在初始化前检查画面。' : '请连接受支持的相机后刷新。';
       updateSelectedCamera(); updateRobotButtons();
@@ -418,18 +419,18 @@
   function updateSelectedCamera() {
     const model = $('robotCameraDevice').selectedOptions[0]?.dataset.model;
     if (!model) return;
-    const name = {gemini2:'Gemini 2',gemini305:'Gemini 305',gemini336:'Gemini 336',d435i:'RealSense D435i'}[model];
+    const name = CAMERA_NAMES[model];
     if (!name) return;
     if (model !== holdDefaultModel) {
       holdDefaultModel = model;
       $('robotStationaryHold').checked = controllerState.running && typeof controllerState.stationary_joint_hold === 'boolean'
         ? controllerState.stationary_joint_hold : (model === 'gemini305' || model === 'gemini336');
     }
-    if (mode === 'monitor') $('previewTitle').textContent = name.toUpperCase();
+    if (mode === 'monitor') $('previewTitle').textContent = name;
     $('realCameraImage').alt = name + ' 实时画面';
     $('robotCameraFpsLabel').hidden = model !== 'gemini305';
     $('cameraName').textContent = name;
-    $('cameraMount').textContent = model === 'gemini305' ? '居中平视支架 · CAD 名义位姿' : model === 'gemini336' ? 'V1 支架 · CAD 名义位姿' : '模型为名义装配 · 跟随需核对位姿';
+    $('cameraMount').textContent = 'CAD 名义位姿 · 跟随前请核对安装';
     showWristCamera(model);
   }
   $('robotCameraDevice').addEventListener('change', updateSelectedCamera);

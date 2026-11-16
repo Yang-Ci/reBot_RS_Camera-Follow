@@ -185,7 +185,7 @@
     <visual>
       <origin rpy="0 0 0" xyz="0.0002 -0.04472 0.03452" />
       <geometry>
-        <mesh filename="package://rebot_mount/gemini2-v1-level/Gemini2_V1_Level.stl" scale="0.001 0.001 0.001" />
+        <mesh filename="package://rebot_mount/gemini2-gemini336-d435i/Gemini2_Gemini336_D435i_Mount.stl" scale="0.001 0.001 0.001" />
       </geometry>
       <material name="camera_mount_black">
         <color rgba="0.035 0.035 0.04 1" />

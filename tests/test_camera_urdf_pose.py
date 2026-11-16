@@ -39,7 +39,7 @@ class CameraUrdfPoseTests(unittest.TestCase):
         for name in ('gemini2_level.urdf', 'd435i_level.urdf', 'gemini336_level.urdf'):
             root = ET.parse(models / name).getroot()
             mesh = root.find("link[@name='camera_mount_link']/visual/geometry/mesh")
-            self.assertTrue(mesh.get('filename').endswith('Gemini2_V1_Level.stl'))
+            self.assertTrue(mesh.get('filename').endswith('Gemini2_Gemini336_D435i_Mount.stl'))
             frames.append(_fixed_chain(root, 'gripper_end', 'camera_color_optical_frame'))
         for frame in frames:
             np.testing.assert_allclose(frame[:3, :3].T @ frame[:3, :3], np.eye(3), atol=1e-8)

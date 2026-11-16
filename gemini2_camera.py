@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Orbbec Gemini 2 相机封装
+Orbbec Gemini 系列相机封装
 替代原项目的 pyrealsense2 (RealSense D405) 相机层。
 
 对外接口与原项目 init_realsense() 返回的东西一一对应：
@@ -69,18 +69,18 @@ class Gemini2Camera:
                 for i in range(mode_list.get_count()):
                     m = mode_list.get_depth_work_mode_by_index(i)
                     name = m.get_name() if hasattr(m, 'get_name') else str(m)
-                    print(f"[Gemini2] 可用深度工作模式: {name}")
+                    print(f"[{self.device_name}] 可用深度工作模式: {name}")
                     if "Binned" in name and "Sparse" in name:
                         bs_mode = m
                 if bs_mode is not None:
                     device.set_depth_work_mode(bs_mode)
-                    print("[Gemini2] 已切换深度工作模式 -> Binned Sparse Default"
+                    print(f"[{self.device_name}] 已切换深度工作模式 -> Binned Sparse Default"
                           "（开放 60fps；深度精度略降）")
                 else:
-                    print("[Gemini2] 未找到 Binned Sparse 模式，60fps 不可用，"
+                    print(f"[{self.device_name}] 未找到 Binned Sparse 模式，60fps 不可用，"
                           "将回退到 30fps")
             except Exception as e:
-                print(f"[Gemini2] 切换深度工作模式失败({e})，将回退到 30fps")
+                print(f"[{self.device_name}] 切换深度工作模式失败({e})，将回退到 30fps")
 
         # ---- 彩色流（请求 MJPG，取流后用 OpenCV 解码，省 USB 带宽）----
         color_profiles = self.pipeline.get_stream_profile_list(OBSensorType.COLOR_SENSOR)
@@ -90,7 +90,7 @@ class Gemini2Camera:
         except OBError:
             # 诊断：打印相机当前实际枚举到的全部彩色 profile
             # （60fps MJPG 只在 USB 3.x 下出现；看不到就说明链路掉到 USB 2.0）
-            print(f"[Gemini2] 未找到 {width}x{height}@{fps} MJPG，"
+            print(f"[{self.device_name}] 未找到 {width}x{height}@{fps} MJPG，"
                   f"相机实际支持的彩色流:")
             for i in range(color_profiles.get_count()):
                 p = color_profiles.get_stream_profile_by_index(i)
@@ -107,7 +107,7 @@ class Gemini2Camera:
                         color_profile, best_area = p, area
             if color_profile is None:
                 color_profile = color_profiles.get_default_video_stream_profile()
-            print(f"[Gemini2] 回退使用: {color_profile.get_width()}x"
+            print(f"[{self.device_name}] 回退使用: {color_profile.get_width()}x"
                   f"{color_profile.get_height()}@{color_profile.get_fps()}")
         config.enable_stream(color_profile)
         # 记录实际生效的彩色分辨率（可能与请求的 640x480 不同，如 60fps 模式下 1280x720）
@@ -143,7 +143,7 @@ class Gemini2Camera:
             except OBError:
                 depth_profile = depth_profiles.get_default_video_stream_profile()
         config.enable_stream(depth_profile)
-        print(f"[Gemini2] 深度流: {depth_profile.get_width()}x"
+        print(f"[{self.device_name}] 深度流: {depth_profile.get_width()}x"
               f"{depth_profile.get_height()}@{depth_profile.get_fps()}")
 
         # ---- 深度对齐到彩色（D2C，硬件对齐）+ 帧同步 ----
@@ -207,7 +207,7 @@ class Gemini2Camera:
         self._timestamp_source = ""
 
         # 预热，丢弃前几帧
-        print("[Gemini2] 预热相机...")
+        print(f"[{self.device_name}] 预热相机...")
         for _ in range(30):
             self.pipeline.wait_for_frames(100)
 
@@ -246,7 +246,7 @@ class Gemini2Camera:
                     # 基准帧全黑（相机刚启动同步抖动）：用固定参考值，
                     # 保证 25% 阈值仍然有意义
                     auto_brightness = 80.0
-                    print("[Gemini2] 自动曝光基准帧过暗，按参考亮度 80 校准")
+                    print(f"[{self.device_name}] 自动曝光基准帧过暗，按参考亮度 80 校准")
                 device.set_bool_property(
                     OBPropertyID.OB_PROP_COLOR_AUTO_EXPOSURE_BOOL, False)
                 ok = False
@@ -256,28 +256,28 @@ class Gemini2Camera:
                     device.set_int_property(
                         OBPropertyID.OB_PROP_COLOR_EXPOSURE_INT, units)
                     bri = _grab_brightness()
-                    print(f"[Gemini2] 曝光试写 {units}（按 {us_per_unit}μs/单位）"
+                    print(f"[{self.device_name}] 曝光试写 {units}（按 {us_per_unit}μs/单位）"
                           f"→ 亮度 {bri:.0f}（自动基准 {auto_brightness:.0f}）")
                     # 接受阈值要严（log32 的误判教训）：目标曝光与自动
                     # 曝光接近（10ms vs 12ms）时，正确单位的亮度应在基准
                     # 的 ~80%；单位猜错一档差 10 倍曝光，亮度只剩零头。
                     # 25% 阈值曾把 1ms 误判成 10ms（画面全暗）。
                     if bri >= max(25.0, 0.40 * auto_brightness):
-                        print(f"[Gemini2] 手动彩色曝光生效: "
+                        print(f"[{self.device_name}] 手动彩色曝光生效: "
                               f"{color_exposure_ms}ms = {units} 单位；"
                               f"画面变暗属正常现象")
                         ok = True
                         break
-                    print("[Gemini2]   → 亮度不足基准 40%，单位假设错误，换下一档")
+                    print(f"[{self.device_name}]   → 亮度不足基准 40%，单位假设错误，换下一档")
                 if not ok:
                     device.set_bool_property(
                         OBPropertyID.OB_PROP_COLOR_AUTO_EXPOSURE_BOOL, True)
-                    print("[Gemini2] 三档单位都太暗，已恢复自动曝光。"
+                    print(f"[{self.device_name}] 三档单位都太暗，已恢复自动曝光。"
                           "环境光可能不足，不建议用手动曝光")
             except Exception as e:
-                print(f"[Gemini2] 手动曝光设置失败({e})，保持自动曝光")
+                print(f"[{self.device_name}] 手动曝光设置失败({e})，保持自动曝光")
 
-        print(f"[Gemini2] 相机就绪  内参: fx={self.fx:.2f} fy={self.fy:.2f} "
+        print(f"[{self.device_name}] 相机就绪  内参: fx={self.fx:.2f} fy={self.fy:.2f} "
               f"cx={self.cx:.2f} cy={self.cy:.2f}")
 
     @staticmethod
@@ -343,7 +343,7 @@ class Gemini2Camera:
         self._last_frame_timestamp_s = timestamp_s
         if source and source != self._timestamp_source:
             self._timestamp_source = source
-            print(f"[Gemini2] 帧硬件时间接口: {source}")
+            print(f"[{self.device_name}] 帧硬件时间接口: {source}")
 
         # 彩色：MJPG 解码为 BGR
         if color_frame.get_format() == OBFormat.MJPG:
@@ -363,8 +363,7 @@ class Gemini2Camera:
             # 即原始单位本来就是 1mm）。本模块对外统一用米，所以除以 1000。
             scale_mm = depth_frame.get_depth_scale()
             self.depth_scale = scale_mm / 1000.0
-            print(f"[Gemini2] depth_scale = {scale_mm} mm/unit "
-                  f"(Gemini 2 应约等于 1.0；若相差很大请检查 SDK 版本)")
+            print(f"[{self.device_name}] depth_scale = {scale_mm} mm/unit")
 
         return color_image, depth_raw, self.depth_scale
 
