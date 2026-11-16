@@ -6,6 +6,7 @@ import os
 import sys
 import atexit
 import signal
+import math
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
@@ -20,11 +21,42 @@ controller = RobotProcess(PROJECT)
 TWIN = Path(os.environ.get('REBOT_TWIN_PATH', '/home/robot/ReBot_Arm_DigitalTwin_RS/reBotArm_simulator-RS')).resolve()
 
 
+def home_preview(degrees):
+    """Convert saved encoder angles to model angles for a read-only preview."""
+    if (not isinstance(degrees, list) or len(degrees) != 6
+            or any(isinstance(x, bool) or not isinstance(x, (int, float))
+                   or not math.isfinite(x) for x in degrees)):
+        return None
+    row = {'q_cmd_valid': '1', **{f'q_cmd_{i+1}': str(math.radians(value))
+                                for i, value in enumerate(degrees)}}
+    return state_from_row(PROJECT, row, 0).get('model_joints')
+
+
+def homes_response():
+    profiles = controller.homes.list()
+    for profile in profiles:
+        profile['model_joints'] = home_preview(profile['degrees'])
+    default = None
+    try:
+        data = json.loads((PROJECT / 'config/home_pose.json').read_text(encoding='utf-8'))
+        radians = data['home_joint_pos']
+        if isinstance(radians, list) and len(radians) == 6:
+            degrees = [math.degrees(value) for value in radians]
+            model = home_preview(degrees)
+            if model is not None:
+                default = {'name': '项目默认 HOME', 'degrees': degrees, 'model_joints': model}
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+        pass
+    return {'profiles': profiles, 'default': default}
+
+
 def latest_state():
     sample = controller.live_telemetry()
     if sample is not None:
         row, age = sample
         return state_from_row(PROJECT, row, age)
+    if controller.status().get('process_mode') == 'gravity':
+        return {'online': False, 'reason': '重力示教实时反馈不可用'}
     return read_latest_state(PROJECT, controller)
 
 
@@ -113,9 +145,19 @@ class Handler(SimpleHTTPRequestHandler):
                     kwargs['fps'] = body['fps']
                 if 'stationary_joint_hold' in body:
                     kwargs['stationary_joint_hold'] = body['stationary_joint_hold']
+                if 'home_profile' in body:
+                    kwargs['home_profile'] = body['home_profile']
                 if 'motion' in body:
                     kwargs['motion'] = validate_motion_settings(body['motion'])
                 result = controller.start(body.get('speed', 'slow'), body.get('gripper', False), **kwargs)
+            elif path == '/api/robot/gravity/start':
+                if body.get('confirm_workspace') is not True:
+                    raise ValueError('请先确认工作区、安全支撑与硬件急停')
+                result = controller.start_gravity()
+            elif path == '/api/home/save':
+                result = controller.save_home(body.get('name'), body.get('degrees'))
+            elif path == '/api/home/gravity-save':
+                result = controller.save_gravity_home(body.get('name'), body.get('replace', False))
             elif path == '/api/camera/start':
                 result = controller.preview_start(body.get('serial'))
             elif path == '/api/camera/stop':
@@ -133,6 +175,8 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json(409, {'error': str(exc)})
 
     def do_GET(self):
+        if urlparse(self.path).path == '/api/home':
+            return self.send_json(200, homes_response())
         if urlparse(self.path).path == '/api/robot/presets':
             try:
                 return self.send_json(200, {'presets': speed_presets(PROJECT)})

@@ -84,7 +84,7 @@ def state_from_row(project, row, age):
         if not actual and not usable_command:
             return {'online': True, 'source': 'unavailable', 'joints': None, 'age_s': age, 'phase': phase,
                     'gripper_open_fraction': gripper,
-                    'servo_failed': row.get('servo_failed') == '1',
+                    'servo_failed': row.get('servo_failed') == '1', 'gravity_state': row.get('gravity_state', ''), 'home_ready': row.get('home_ready') == '1', 'zero_recovery': row.get('zero_recovery') == '1',
                     'visible': row.get('visible') == '1', 'following': following,
                     'hold': row.get('hold_latch') == '1', 'error': row.get('error', '')}
         source = 'actual' if actual else 'command'
@@ -115,7 +115,7 @@ def state_from_row(project, row, age):
                 pass
         return {'online': True, 'source': source, 'joints': joints, 'phase': phase,
                 'gripper_open_fraction': gripper,
-                'servo_failed': row.get('servo_failed') == '1',
+                'servo_failed': row.get('servo_failed') == '1', 'gravity_state': row.get('gravity_state', ''), 'home_ready': row.get('home_ready') == '1', 'zero_recovery': row.get('zero_recovery') == '1',
                 'model_joints': model_joints, 'age_s': age,
                 'estimated_model_joints': estimated_model_joints,
                 'visible': row.get('visible') == '1', 'following': row.get('following') == '1',

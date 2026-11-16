@@ -13,6 +13,10 @@
   let mode = 'monitor';
   let controllerState = {running:false, ready:false, stopping:false}, robotActionPending = false, currentFollowing = false, telemetryOnline = false;
   let controllerConnected = false, speedPresets = null, servoFault = false;
+  let homeProfiles = [], defaultHome = null, homesLoaded = false, homeSavePending = false, latestActualJoints = null, latestActualAt = 0;
+  let gravityState = '', gravityHomeReady = false;
+  let initialHomeSelection = null;
+  try { initialHomeSelection = localStorage.getItem('rebot_home_profile') || ''; } catch (_) {}
   let robot = null, angle = .72, elevation = .43, distance = 1.8, pointer = null;
   const target = new THREE.Vector3(0,.27,0);
   function view(){camera.position.set(target.x+distance*Math.cos(elevation)*Math.sin(angle),target.y+distance*Math.sin(elevation),target.z+distance*Math.cos(elevation)*Math.cos(angle));camera.lookAt(target);}
@@ -225,6 +229,50 @@
   document.addEventListener('visibilitychange', () => { if (document.hidden && mode === 'camera' && (stream || starting)) stopCamera('页面已切到后台，摄像头已关闭。'); });
   window.addEventListener('pagehide', () => stopCamera());
 
+  const homeJointInputs = Array.from({length:6}, (_, i) => $('homeJ' + (i + 1)));
+  function setHomeMessage(message, error=false) { $('homeMessage').textContent=message; $('homeMessage').style.color=error ? '#f4a199' : ''; }
+  async function loadHomes(selected=null) {
+    try {
+      const response=await fetch('/api/home',{cache:'no-store'}), data=await response.json();
+      if(!response.ok) throw Error(data.error || 'HOME 列表读取失败');
+      const prior=selected===null ? (initialHomeSelection ?? $('homeProfile').value) : selected;
+      initialHomeSelection=null;
+      if(!Array.isArray(data.profiles)) throw Error('HOME 列表无效');
+      homeProfiles=data.profiles; defaultHome=data.default || null; homesLoaded=true;
+      $('homeProfile').replaceChildren(new Option('项目默认 HOME',''));
+      for(const item of homeProfiles) $('homeProfile').add(new Option(item.name,item.id));
+      $('homeProfile').value=homeProfiles.some(item=>item.id===prior) ? prior : '';
+      $('homeSelectionMessage').textContent=prior && !$('homeProfile').value ? '之前选择的 HOME 已不存在，请重新选择并检查默认 HOME。' : '';
+      if(prior && !$('homeProfile').value){try { localStorage.removeItem('rebot_home_profile'); } catch (_) {}}
+      updateRobotButtons(); return true;
+    } catch(error) { homesLoaded=false; $('homeSelectionMessage').textContent=error.message; updateRobotButtons(); return false; }
+  }
+  $('homeProfile').addEventListener('change',()=>{
+    try { localStorage.setItem('rebot_home_profile', $('homeProfile').value); } catch (_) {}
+    const profile=homeProfiles.find(item=>item.id===$('homeProfile').value);
+    if(profile){$('homeName').value=profile.name;homeJointInputs.forEach((input,i)=>input.value=profile.degrees[i].toFixed(2));}
+    $('homeSelectionMessage').textContent='';
+    $('robotSafetyConfirm').checked=false;updateRobotButtons();
+    if (!controllerState.running) update();
+  });
+  $('homeCapture').addEventListener('click',()=>{
+    if(!controllerState.running || !latestActualJoints || Date.now()-latestActualAt>300){setHomeMessage('没有新鲜的实际关节反馈，无法填入。',true);return;}
+    homeJointInputs.forEach((input,i)=>input.value=(latestActualJoints[i]*180/Math.PI).toFixed(2));
+    setHomeMessage('已填入实际角度；退出真机程序后可保存。');
+  });
+  $('homeSave').addEventListener('click',async()=>{
+    const name=$('homeName').value.trim(), degrees=homeJointInputs.map(input=>input.value.trim()==='' ? NaN : Number(input.value));
+    if(!name || degrees.some(value=>!Number.isFinite(value))){setHomeMessage('请输入名称和六个有效角度。',true);return;}
+    if(homeProfiles.some(item=>item.name===name) && !window.confirm('同名 HOME 已存在，确认替换？')) return;
+    homeSavePending=true;updateRobotButtons();
+    try{
+      const response=await fetch('/api/home/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,degrees})});
+      const data=await response.json();if(!response.ok)throw Error(data.error || '保存失败');
+      const loaded=await loadHomes(data.id);$('robotSafetyConfirm').checked=false;
+      if(loaded){try { localStorage.setItem('rebot_home_profile', data.id); } catch (_) {}
+        setHomeMessage('已保存并选择该 HOME，下次初始化使用。');}
+    }catch(error){setHomeMessage(error.message,true);}finally{homeSavePending=false;updateRobotButtons();}
+  });
   function robotMessage(value, error = false) { $('robotMessage').textContent = value; $('robotMessage').classList.toggle('error', error); }
   const motionFields = {gain:'robotGain', gain_x:'robotGainX', max_vel:'robotMaxVel'};
   function showMotion(settings) {
@@ -257,15 +305,29 @@
   }
   function updateRobotButtons() {
     const active = controllerState.running, ready = active && controllerState.ready && !controllerState.stopping;
-    const unavailable = !controllerConnected || robotActionPending;
-    $('robotStart').disabled = unavailable || !speedPresets || active || !$('robotCameraDevice').value || !$('robotSafetyConfirm').checked;
+    const gravityMode = active && controllerState.process_mode === 'gravity';
+    const savingPose = controllerState.home_save?.state === 'returning';
+    const unavailable = !controllerConnected || robotActionPending || homeSavePending || savingPose;
+    $('robotStart').disabled = unavailable || !speedPresets || !homesLoaded || active || !$('robotCameraDevice').value || !$('robotSafetyConfirm').checked;
+    $('robotStartReason').textContent = !controllerConnected ? '网页服务未连接' : savingPose ? '正在回零并保存姿态' : robotActionPending || homeSavePending ? '正在处理请求' : active ? '机械臂程序正在运行' : !speedPresets ? '速度配置尚未就绪' : !homesLoaded ? 'HOME 列表尚未就绪' : !$('robotCameraDevice').value ? '请选择已连接的相机' : !$('robotSafetyConfirm').checked ? '请先确认 HOME 路径和硬件急停' : '';
     $('robotSpeed').disabled = unavailable || !speedPresets || active;
     $('robotGripper').disabled = unavailable || active;
     $('robotStationaryHold').disabled = unavailable || active;
+    $('homeProfile').disabled = unavailable || active;
+    $('homeSave').disabled = unavailable || active;
+    $('homeName').disabled = unavailable || (active && !gravityMode);
+    homeJointInputs.forEach(input=>input.disabled=unavailable || active);
+    $('homeCapture').disabled = unavailable || !active || !telemetryOnline || !latestActualJoints || Date.now()-latestActualAt>300;
     $('robotSafetyConfirm').disabled = unavailable || active;
     for (const id of Object.values(motionFields)) $(id).disabled = unavailable || !speedPresets || active;
-    $('robotFollow').disabled = unavailable || !ready || !telemetryOnline || currentFollowing || servoFault;
-    $('robotPause').disabled = unavailable || !ready || servoFault;
+    $('gravitySave').disabled = unavailable || !gravityMode || !ready || servoFault || controllerState.gravity_fault || !gravityHomeReady || !latestActualJoints || Date.now()-latestActualAt>300;
+    $('gravityConfirm').disabled = unavailable || active;
+    $('gravityStart').disabled = unavailable || active || !$('gravityConfirm').checked;
+    $('gravityStatus').textContent = gravityMode ? ((servoFault || controllerState.gravity_fault) ? '反馈异常：请支撑机械臂并检查硬件急停' : controllerState.stopping ? '正在回零' : !ready ? '正在启动' : ({STARTUP:'正在过渡', FOLLOW:'正在手推', LOCKED:gravityHomeReady?'已锁定，可保存姿态':'等待关节稳定'}[gravityState] || '等待反馈')) : '示教未启动';
+    if(gravityMode && !gravityHomeReady) $('homeCapture').disabled = true;
+    $('robotFollow').disabled = unavailable || gravityMode || !ready || !telemetryOnline || currentFollowing || servoFault;
+    $('robotPause').disabled = unavailable || gravityMode || !ready || servoFault;
+    $('robotStop').textContent = gravityMode ? '结束示教并回零' : '退出并回零';
     $('robotStop').disabled = unavailable || !active || controllerState.stopping;
     $('modeCamera').disabled = active || robotActionPending;
     $('robotCameraDevice').disabled = unavailable || active || controllerState.preview_running;
@@ -291,9 +353,25 @@
     const motion = Object.fromEntries(Object.entries(motionFields).map(([key, id]) => [key, Number($(id).value)]));
     const model = $('robotCameraDevice').selectedOptions[0]?.dataset.model || 'gemini336';
     const fps = model === 'gemini305' ? Number($('robotCameraFps').value) : undefined;
-    robotAction('start', {speed:$('robotSpeed').value, gripper:$('robotGripper').value === 'gesture', serial:$('robotCameraDevice').value || null, camera:model, fps, motion, stationary_joint_hold:$('robotStationaryHold').checked, confirm_home:$('robotSafetyConfirm').checked});
+    robotAction('start', {speed:$('robotSpeed').value, gripper:$('robotGripper').value === 'gesture', serial:$('robotCameraDevice').value || null, camera:model, fps, motion, home_profile:$('homeProfile').value, stationary_joint_hold:$('robotStationaryHold').checked, confirm_home:$('robotSafetyConfirm').checked});
   });
   $('robotSafetyConfirm').addEventListener('change', updateRobotButtons);
+  $('gravityConfirm').addEventListener('change', updateRobotButtons);
+  $('gravityStart').addEventListener('click', () => robotAction('gravity/start', {confirm_workspace:$('gravityConfirm').checked}));
+  $('gravitySave').addEventListener('click', async () => {
+    const name = $('homeName').value.trim();
+    if (!name) { setHomeMessage('请输入 HOME 名称。', true); return; }
+    const replace = homeProfiles.some(item => item.name === name);
+    if (replace && !window.confirm('同名 HOME 已存在，回零后替换？')) return;
+    homeSavePending = true; updateRobotButtons();
+    try {
+      const response = await fetch('/api/home/gravity-save', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name, replace})});
+      const result = await response.json();
+      if (!response.ok) throw Error(result.error || '无法记录姿态');
+      setHomeMessage(result.message); await updateController();
+    } catch (error) { setHomeMessage(error.message, true); }
+    finally { homeSavePending = false; updateRobotButtons(); }
+  });
   $('robotFollow').addEventListener('click', () => robotAction('follow', {enabled:true}));
   $('robotPause').addEventListener('click', () => robotAction('follow', {enabled:false}));
   $('robotStop').addEventListener('click', () => robotAction('shutdown'));
@@ -367,16 +445,29 @@
       controllerConnected = true;
       controllerState = state;
       if (state.running && !old.running) {
+        $('gravityConfirm').checked = false;
         $('robotSafetyConfirm').checked = false;
         if (state.speed_mode) $('robotSpeed').value = state.speed_mode;
         if (state.camera_fps) $('robotCameraFps').value = String(state.camera_fps);
         if (typeof state.stationary_joint_hold === 'boolean') $('robotStationaryHold').checked = state.stationary_joint_hold;
-        showMotion(state.motion_settings);
-        if (!state.motion_settings) $('robotParameterHint').textContent = '当前运行的参数不可用；请查看程序日志。';
+        if(state.process_mode !== 'gravity') {
+          showMotion(state.motion_settings);
+          if (!state.motion_settings) $('robotParameterHint').textContent = '当前运行的参数不可用；请查看程序日志。';
+        }
+      }
+      if (state.home_save?.state === 'saved' && old.home_save?.state !== 'saved') {
+        const loaded = await loadHomes(state.home_save.id);
+        if (loaded) {
+          try { localStorage.setItem('rebot_home_profile', state.home_save.id); } catch (_) {}
+          $('robotSafetyConfirm').checked = false;
+          setHomeMessage('姿态已保存并选中；初始化前请确认路径和相机。');
+        }
+      } else if (state.home_save?.state === 'failed' && old.home_save?.state !== 'failed') {
+        setHomeMessage(state.home_save.error || '保存失败', true);
       }
       if (state.preview_failed && !old.preview_failed) $('robotCameraMessage').textContent = '相机打开失败，请检查连接或其他程序占用后重试。';
-      if (state.running && !old.running) robotMessage('程序启动中：机械臂将移动到 HOME。');
-      if (state.ready && !old.ready) robotMessage('HOME 已就绪，按 R 或张开手掌 3 秒开始跟随。');
+      if (state.running && !old.running) robotMessage(state.process_mode === 'gravity' ? '正在启动重力示教，请扶持机械臂。' : '程序启动中：机械臂将移动到 HOME。');
+      if (state.ready && !old.ready) robotMessage(state.process_mode === 'gravity' ? '重力示教已就绪，请轻推并保持扶持。' : 'HOME 已就绪，按 R 或张开手掌 3 秒开始跟随。');
       if (state.stopping && !old.stopping) robotMessage('正在退出：机械臂将回零并失能。');
       if (!state.running && (old.running || state.error_summary)) robotMessage(state.exit_code === 0 ? '真机程序已退出。' : (state.error_summary || '真机程序已退出，请检查程序信息。'), state.exit_code !== 0);
       $('robotError').hidden = !state.error_log; $('robotErrorText').textContent = state.error_log || '';
@@ -389,7 +480,7 @@
       robotMessage('网页服务未连接，无法操作真机。', true);
     }
   }
-  updateController(); loadSpeedPresets(); setInterval(updateController, 500);
+  updateController(); loadSpeedPresets(); loadHomes(); setInterval(updateController, 500);
 
   let previewURL = null, previewPending = false, previewEpoch = 0;
   function resetRealPreview() {
@@ -438,7 +529,23 @@
   }
   setInterval(updateRealPreview, 100);
 
+  function showHomePreview() {
+    if (!controllerConnected || controllerState.running) return false;
+    const profile = $('homeProfile').value ? homeProfiles.find(item => item.id === $('homeProfile').value) : defaultHome;
+    if (!profile || !Array.isArray(profile.model_joints) || profile.model_joints.length !== 6 ||
+        !profile.model_joints.every(Number.isFinite) || !Array.isArray(profile.degrees) || profile.degrees.length !== 6 || !profile.degrees.every(Number.isFinite)) return false;
+    monitorTarget = profile.model_joints.slice();
+    if (!monitorJoints) monitorJoints = monitorTarget.slice();
+    profile.degrees.forEach((degrees, i) => {
+      $('joint'+i).textContent = degrees.toFixed(1)+'°';
+      $('bar'+i).style.width = Math.min(100, Math.abs(degrees)/180*100)+'%';
+    });
+    $('source').textContent = 'HOME 姿态预览（非实际位置）';
+    $('follow').textContent = 'HOME 模型预览';
+    return true;
+  }
+
   let stateRequestPending = false;
-  async function update(){if (mode !== 'monitor' || stateRequestPending) return; stateRequestPending = true; try{const res=await fetch('/api/state',{cache:'no-store'});if(!res.ok)throw Error('network');const s=await res.json();if(mode !== 'monitor')return;telemetryOnline=!!s.online;monitorGripTarget=(s.online && Number.isFinite(s.gripper_open_fraction)) ? Math.max(0, Math.min(1, s.gripper_open_fraction)) * .0715 : null;$('gripperStatus').textContent=monitorGripTarget === null ? '暂无数据' : `目标 ${Math.round(s.gripper_open_fraction * 100)}%`;currentFollowing=!!s.following;servoFault=!!s.servo_failed;updateRobotButtons();$('dot').classList.toggle('online',s.online);$('connection').textContent=s.online?'数据更新中':'未连接';$('source').textContent=s.online?(s.source==='actual'?(s.estimated_model_joints ? `模型估算 · 数值为实际反馈（目标 ${s.feedback_rate_hz || '—'} Hz）` : '实际反馈'):s.source==='command'?'关节指令（非实测）':'等待有效关节数据'):'暂无实时数据';if(s.online && !s.model_joints && s.joints) $('source').textContent+=' · 缺少零位修正，模型未更新';$('follow').textContent=s.online?(s.phase==='home'?'正在前往 HOME':s.phase==='return'?'正在回零':s.following?'正在跟随':'等待跟随'):'等待数据';$('robotSafetyStatus').textContent=(s.online&&((!s.following&&/暂停|丢失|反馈|错误|无效|异常|超时/.test(s.error||''))||/深度估算|低速恢复/.test(s.error||'')))?s.error:'';$('palm').textContent=s.online?(s.visible?'已检测':'未检测'):'—';$('hold').textContent=s.online?(s.hold?'已保持':'未保持'):'—';if(s.online && Array.isArray(s.joints)){s.joints.forEach((v,i)=>{const deg=v*180/Math.PI;$('joint'+i).textContent=deg.toFixed(1)+'°';$('bar'+i).style.width=Math.min(100,Math.abs(deg)/180*100)+'%';});const nextModel = s.estimated_model_joints || s.model_joints;if(Array.isArray(nextModel) && nextModel.length === 6 && nextModel.every(Number.isFinite)){monitorTarget=nextModel.slice();if(!monitorJoints)monitorJoints=monitorTarget.slice();}}else{monitorTarget=null;}}catch(_){if(mode !== 'monitor')return;monitorTarget=null;monitorGripTarget=null;$('gripperStatus').textContent='暂无数据';telemetryOnline=false;updateRobotButtons();$('dot').classList.remove('online');$('connection').textContent='服务未连接';$('source').textContent='暂无实时数据';$('follow').textContent='等待数据';$('palm').textContent='—';$('hold').textContent='—';}finally{stateRequestPending=false;}}
+  async function update(){if (mode !== 'monitor' || stateRequestPending) return; stateRequestPending = true; try{const res=await fetch('/api/state',{cache:'no-store'});if(!res.ok)throw Error('network');const s=await res.json();if(mode !== 'monitor')return;telemetryOnline=!!s.online;gravityState=s.gravity_state || '';gravityHomeReady=!!s.home_ready;const feedbackAgeMs=Number(s.feedback_age_ms)+Number(s.age_s)*1000;if(s.online && s.source==='actual' && s.feedback_age_ms!=='' && s.feedback_age_ms!=null && Number.isFinite(feedbackAgeMs) && feedbackAgeMs>=0 && feedbackAgeMs<=300 && Array.isArray(s.joints) && s.joints.length===6 && s.joints.every(Number.isFinite)){latestActualJoints=s.joints.slice();latestActualAt=Date.now()-feedbackAgeMs;}else{latestActualJoints=null;}monitorGripTarget=(s.online && Number.isFinite(s.gripper_open_fraction)) ? Math.max(0, Math.min(1, s.gripper_open_fraction)) * .0715 : null;$('gripperStatus').textContent=monitorGripTarget === null ? '暂无数据' : `目标 ${Math.round(s.gripper_open_fraction * 100)}%`;currentFollowing=!!s.following;servoFault=!!s.servo_failed;updateRobotButtons();$('dot').classList.toggle('online',s.online);$('connection').textContent=s.online?'数据更新中':'未连接';$('source').textContent=s.online?(s.source==='actual'?(s.estimated_model_joints ? `模型估算 · 数值为实际反馈（目标 ${s.feedback_rate_hz || '—'} Hz）` : '实际反馈'):s.source==='command'?'关节指令（非实测）':'等待有效关节数据'):'暂无实时数据';if(s.online && !s.model_joints && s.joints) $('source').textContent+=' · 缺少零位修正，模型未更新';$('follow').textContent=s.online?(s.phase==='home'?'正在前往 HOME':s.phase==='return'?'正在回零':s.phase==='gravity'?'重力示教':s.following?'正在跟随':'等待跟随'):'等待数据';$('robotSafetyStatus').textContent=(s.online&&((!s.following&&/暂停|丢失|反馈|错误|无效|异常|超时/.test(s.error||''))||/深度估算|低速恢复/.test(s.error||'')))?s.error:'';$('palm').textContent=s.online?(s.visible?'已检测':'未检测'):'—';$('hold').textContent=s.online?(s.hold?'已保持':'未保持'):'—';if(s.online && Array.isArray(s.joints)){s.joints.forEach((v,i)=>{const deg=v*180/Math.PI;$('joint'+i).textContent=deg.toFixed(1)+'°';$('bar'+i).style.width=Math.min(100,Math.abs(deg)/180*100)+'%';});const nextModel = s.estimated_model_joints || s.model_joints;if(Array.isArray(nextModel) && nextModel.length === 6 && nextModel.every(Number.isFinite)){monitorTarget=nextModel.slice();if(!monitorJoints)monitorJoints=monitorTarget.slice();}}else if(!showHomePreview()){monitorTarget=null;}}catch(_){if(mode !== 'monitor')return;monitorTarget=null;monitorGripTarget=null;$('gripperStatus').textContent='暂无数据';telemetryOnline=false;updateRobotButtons();$('dot').classList.remove('online');$('connection').textContent='服务未连接';$('source').textContent='暂无实时数据';$('follow').textContent='等待数据';$('palm').textContent='—';$('hold').textContent='—';}finally{stateRequestPending=false;}}
   update();setInterval(update,33);
 })();

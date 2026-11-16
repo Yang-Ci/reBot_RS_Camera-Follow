@@ -55,6 +55,18 @@ class LiveTelemetryTests(unittest.TestCase):
         self.assertEqual(fresh['source'], 'actual')
         self.assertEqual(stale['source'], 'command')
 
+    def test_gravity_ready_state_is_exposed(self):
+        row = {'fb_valid': '1', 'fb_age_ms': '10', 'fb_rate_hz': '20',
+               'gravity_state': 'LOCKED', 'home_ready': '1', 'zero_recovery': '1'}
+        row.update({f'q_act_{i}': '0' for i in range(1, 7)})
+        state = state_from_row(ROOT, row, 0.)
+        self.assertEqual(state['source'], 'actual')
+        self.assertEqual(state['gravity_state'], 'LOCKED')
+        self.assertTrue(state['home_ready'])
+        self.assertTrue(state['zero_recovery'])
+        row['home_ready'] = '0'
+        self.assertFalse(state_from_row(ROOT, row, 0.)['home_ready'])
+
     def test_explicitly_invalid_command_is_never_displayed(self):
         row = {'fb_valid': '0', 'q_cmd_valid': '0', 'following': '1', 'visible': '1'}
         row.update({f'q_cmd_{i}': '0' for i in range(1, 7)})

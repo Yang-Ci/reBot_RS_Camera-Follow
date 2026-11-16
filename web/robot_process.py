@@ -11,6 +11,7 @@ import math
 from pathlib import Path
 
 from live_telemetry import LiveTelemetryReceiver
+from home_manager import HomeManager
 
 
 def validate_motion_settings(settings):
@@ -51,6 +52,7 @@ def speed_presets(project):
 class RobotProcess:
     def __init__(self, project):
         self.project = Path(project)
+        self.homes = HomeManager(self.project)
         self.lock = threading.Lock()
         self.process = None
         self.ready_path = None
@@ -68,6 +70,8 @@ class RobotProcess:
         self.speed_mode = None
         self.camera_fps = None
         self.stationary_joint_hold = None
+        self.process_mode = None
+        self.home_save = None
 
     def cameras(self):
         python = self.project / '.venv-arm/bin/python'
@@ -181,7 +185,7 @@ class RobotProcess:
         for item in Path('/proc').glob('[0-9]*/cmdline'):
             try:
                 argv = item.read_bytes().split(b'\0')
-                if any(Path(os.fsdecode(v)).name == 'palm_follow_grasp.py' for v in argv if v):
+                if any(Path(os.fsdecode(v)).name in ('palm_follow_grasp.py', 'gravity_home.py') for v in argv if v):
                     return True
             except (OSError, ValueError):
                 continue
@@ -190,9 +194,20 @@ class RobotProcess:
     def status(self):
         with self.lock:
             running = self._running()
+            gravity_fault = False
+            if running and self.process_mode == 'gravity' and self.ready_path:
+                try:
+                    marker = self.ready_path.read_text().strip()
+                    gravity_fault = marker in (f'fault={self.process.pid}', f'stop_failed={self.process.pid}')
+                    if self.stopping and marker == f'stop_failed={self.process.pid}':
+                        self.stopping = False
+                except OSError:
+                    pass
             preview_running = self.preview_process is not None and self.preview_process.poll() is None
             preview_failed = self.preview_process is not None and not preview_running
             return {'running': running, 'ready': self._ready(), 'stopping': self.stopping and running,
+                    'process_mode': self.process_mode if running else None, 'gravity_fault': gravity_fault,
+                    'home_save': dict(self.home_save) if self.home_save else None,
                     'motion_settings': self.motion_settings if running else None,
                     'speed_mode': self.speed_mode if running else None,
                     'camera_fps': self.camera_fps if running else None,
@@ -201,7 +216,9 @@ class RobotProcess:
                     'exit_code': None if self.process is None else self.process.poll(),
                     'started_at': self.started_at, 'ended_at': self.ended_at, 'log': self.log_path.name if self.log_path else None}
 
-    def start(self, speed='slow', gripper=False, serial=None, motion=None, camera='gemini336', fps=None, stationary_joint_hold=None):
+    def start(self, speed='slow', gripper=False, serial=None, motion=None, camera='gemini336', fps=None, stationary_joint_hold=None, home_profile=None):
+        if home_profile is not None and not isinstance(home_profile, str):
+            raise ValueError('HOME 选择无效')
         if speed not in ('slow', 'medium', 'configured') or type(gripper) is not bool:
             raise ValueError('无效的速度或夹爪选项')
         if camera not in ('gemini2', 'gemini305', 'gemini336', 'd435i'):
@@ -218,8 +235,11 @@ class RobotProcess:
         if motion is not None:
             motion = validate_motion_settings(motion)
         with self.lock:
+            if self.home_save and self.home_save['state'] == 'returning':
+                raise RuntimeError('HOME 保存和回零尚未完成')
             if self._running():
                 raise RuntimeError('网页已启动真机程序')
+            home_file = self.homes.checked_path(home_profile) if home_profile else None
             python = self.project / '.venv-arm/bin/python'
             if not python.is_file():
                 raise RuntimeError('未找到 .venv-arm/bin/python，请先配置机械臂环境')
@@ -252,6 +272,8 @@ class RobotProcess:
             args = [str(python), '-u', str(self.project / 'palm_follow_grasp.py'),
                     '--camera', camera, '--headless', '--web-control',
                     '--home-j34-tolerance', '3.5']
+            if home_file is not None:
+                args += ['--home-file', str(home_file)]
             if fps is not None:
                 args += ['--fps', str(fps)]
             if stationary_joint_hold is not None:
@@ -284,6 +306,7 @@ class RobotProcess:
                     self.process = subprocess.Popen(args, cwd=str(self.project), env=env,
                                                     stdin=subprocess.DEVNULL, stdout=output,
                                                     stderr=subprocess.STDOUT, start_new_session=True)
+                    self.process_mode = 'follow'
                     self.motion_settings = motion
                     self.speed_mode = speed
                     self.camera_fps = fps
@@ -300,6 +323,142 @@ class RobotProcess:
                 raise
             self.stopping = False
             return {'ok': True, 'message': '正在移动到 HOME；到位后等待按 R 或张开手掌 3 秒'}
+
+    def start_gravity(self):
+        with self.lock:
+            if self.home_save and self.home_save['state'] == 'returning':
+                raise RuntimeError('HOME 保存和回零尚未完成')
+            if self._running():
+                raise RuntimeError('请先退出当前机械臂程序')
+            python = self.project / '.venv-arm/bin/python'
+            if not python.is_file():
+                raise RuntimeError('未找到 .venv-arm/bin/python，请先配置机械臂环境')
+            self._stop_preview()
+            logs = self.project / 'logs'
+            logs.mkdir(exist_ok=True)
+            self.lock_file = (logs / '.web_controller.lock').open('a')
+            try:
+                fcntl.flock(self.lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                if self._other_controller():
+                    raise RuntimeError('检测到其他机械臂程序')
+            except (BlockingIOError, RuntimeError):
+                self.lock_file.close(); self.lock_file = None
+                raise RuntimeError('已有控制程序或网页会话，不能重复占用 CAN')
+            token = secrets.token_hex(12)
+            try:
+                self.telemetry = LiveTelemetryReceiver(token)
+            except OSError:
+                self.telemetry = None
+            self.ready_path = logs / f'.web_ready_{token}'
+            self.preview_path = None
+            self.log_path = logs / f'web_gravity_{time.strftime("%Y%m%d_%H%M%S")}_{token[:6]}.log'
+            env = os.environ.copy()
+            env.pop('REBOT_TELEMETRY_PORT', None); env.pop('REBOT_TELEMETRY_TOKEN', None)
+            env['REBOT_WEB_READY_PATH'] = str(self.ready_path)
+            env['REBOT_CONTROL_LOCK_FD'] = str(self.lock_file.fileno())
+            if self.telemetry is not None:
+                env['REBOT_TELEMETRY_PORT'] = str(self.telemetry.port)
+                env['REBOT_TELEMETRY_TOKEN'] = self.telemetry.token
+            try:
+                with self.log_path.open('w', encoding='utf-8') as output:
+                    self.started_at = time.time(); self.ended_at = None
+                    self.process = subprocess.Popen(
+                        [str(python), '-u', str(self.project / 'tools/gravity_home.py')],
+                        cwd=str(self.project), env=env, stdin=subprocess.DEVNULL,
+                        stdout=output, stderr=subprocess.STDOUT, start_new_session=True,
+                        pass_fds=(self.lock_file.fileno(),))
+                self.process_mode = 'gravity'
+                self.motion_settings = self.speed_mode = self.camera_fps = self.stationary_joint_hold = None
+                self.stopping = False
+            except BaseException:
+                if self.telemetry is not None:
+                    self.telemetry.close(); self.telemetry = None
+                fcntl.flock(self.lock_file.fileno(), fcntl.LOCK_UN)
+                self.lock_file.close(); self.lock_file = None
+                raise
+            return {'ok': True, 'message': '正在启动重力示教；就绪后可轻推并填入实际角度'}
+
+    def save_home(self, name, degrees):
+        with self.lock:
+            if self._running():
+                raise RuntimeError('请先退出真机程序，再保存 HOME')
+            return self.homes.validate(name, degrees, save=True)
+
+    def _stable_gravity_pose(self):
+        if self.process_mode != 'gravity' or not self._ready() or self.telemetry is None:
+            raise RuntimeError('重力示教尚未就绪或正在退出')
+        sample = self.telemetry.latest()
+        if sample is None:
+            raise RuntimeError('没有新鲜的实际关节反馈')
+        row, age = sample
+        try:
+            feedback_age = float(row['fb_age_ms']) / 1000. + age
+            q = [float(row[f'q_act_{i}']) for i in range(1, 7)]
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError('实际关节反馈无效') from exc
+        if (row.get('phase') != 'gravity' or row.get('home_ready') != '1'
+                or row.get('fb_valid') != '1' or not math.isfinite(feedback_age)
+                or not 0 <= feedback_age <= .3 or not all(math.isfinite(x) for x in q)):
+            raise RuntimeError('请保持机械臂静止，等待新鲜的实际反馈')
+        return [math.degrees(x) for x in q]
+
+    def save_gravity_home(self, name, replace=False):
+        if (not isinstance(name, str) or not name.strip() or len(name.strip()) > 40
+                or any(ord(char) < 32 for char in name) or type(replace) is not bool):
+            raise ValueError('请输入有效的 HOME 名称')
+        name = name.strip()
+        with self.lock:
+            if self.home_save and self.home_save['state'] == 'returning':
+                raise RuntimeError('HOME 保存和回零正在进行')
+            if not replace and any(item['name'] == name for item in self.homes.list()):
+                raise ValueError('同名 HOME 已存在，请确认替换')
+            degrees = self._stable_gravity_pose()
+            self.homes.validate(name, degrees, save=False)
+            current = self._stable_gravity_pose()
+            if max(abs(a-b) for a, b in zip(current, degrees)) > .3:
+                raise RuntimeError('机械臂姿态已变化，请保持静止后重试')
+            process = self.process
+            self.stopping = True
+            if self.ready_path:
+                try: self.ready_path.unlink()
+                except FileNotFoundError: pass
+            try:
+                process.send_signal(signal.SIGINT)
+            except OSError:
+                self.stopping = False
+                raise
+            self.home_save = {'state': 'returning', 'name': name}
+            threading.Thread(target=self._finish_gravity_home,
+                             args=(process, name, degrees), daemon=True).start()
+            return {'ok': True, 'message': '已记录姿态，正在回零；完成后自动保存 HOME'}
+
+    def _finish_gravity_home(self, process, name, degrees):
+        while process.poll() is None:
+            try:
+                process.wait(timeout=.2)
+            except subprocess.TimeoutExpired:
+                with self.lock:
+                    try: marker = self.ready_path.read_text().strip() if self.ready_path else ''
+                    except OSError: marker = ''
+                    if marker == f'stop_failed={process.pid}':
+                        self.home_save = {'state': 'failed', 'error': '回零交接失败，姿态未保存；请扶持机械臂并检查急停和反馈'}
+                        return
+        try:
+            log = self.log_path.read_text(encoding='utf-8', errors='replace') if self.log_path else ''
+        except OSError:
+            log = ''
+        return_sent = ('Zero sent and hold complete' in log
+                       and '[Return-to-zero error / 回零错误]' not in log)
+        if process.returncode != 0 or not return_sent:
+            result = {'state': 'failed', 'error': '未确认回零指令完成，姿态未保存；请检查机械臂和程序信息'}
+        else:
+            try:
+                saved = self.homes.validate(name, degrees, save=True)
+                result = {'state': 'saved', **saved}
+            except Exception as exc:
+                result = {'state': 'failed', 'error': f'已回零，但 HOME 保存失败：{exc}'}
+        with self.lock:
+            self.home_save = result
 
     def live_telemetry(self):
         with self.lock:
@@ -338,6 +497,8 @@ class RobotProcess:
         if type(enabled) is not bool:
             raise ValueError('无效跟随状态')
         with self.lock:
+            if self.process_mode == 'gravity':
+                raise RuntimeError('重力示教期间不能启动手掌跟随')
             if not self._ready():
                 raise RuntimeError('真机程序尚未就绪或正在退出')
             self.process.send_signal(signal.SIGUSR1 if enabled else signal.SIGUSR2)
@@ -349,5 +510,10 @@ class RobotProcess:
                 raise RuntimeError('网页没有运行中的真机程序')
             if not self.stopping:
                 self.stopping = True
+                if self.process_mode == 'gravity' and self.ready_path:
+                    try:
+                        self.ready_path.unlink()
+                    except FileNotFoundError:
+                        pass
                 self.process.send_signal(signal.SIGINT)
             return {'ok': True, 'message': '已请求退出；程序将保持、回零并失能'}

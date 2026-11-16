@@ -233,7 +233,7 @@ class HttpSecurityTests(unittest.TestCase):
         cls.web = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(cls.web)
 
-    def request(self, origin, host='127.0.0.1:8765', body=b'{"confirm_home":true}', content_type='application/json'):
+    def request(self, origin, host='127.0.0.1:8765', body=b'{"confirm_home":true}', content_type='application/json', path='/api/robot/start'):
         from email.message import Message
         handler = object.__new__(self.web.Handler)
         handler.headers = Message()
@@ -243,10 +243,24 @@ class HttpSecurityTests(unittest.TestCase):
         handler.headers['Content-Length'] = str(len(body))
         handler.client_address = ('127.0.0.1', 1234)
         handler.server = type('Server', (), {'server_address': ('127.0.0.1', 8765)})()
-        handler.path = '/api/robot/start'; handler.rfile = io.BytesIO(body)
+        handler.path = path; handler.rfile = io.BytesIO(body)
         handler.send_json = mock.Mock()
         handler.do_POST()
         return handler.send_json.call_args.args
+
+    def test_home_preview_uses_offsets_and_keeps_saved_pose_separate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            (project / 'config').mkdir()
+            (project / 'config/joint_offset.json').write_text(json.dumps({'joint_offset_rad': [0.1]*6}))
+            (project / 'config/home_pose.json').write_text(json.dumps({'home_joint_pos': [0.2]*6}))
+            saved = [{'id': 'a'*64, 'name': '桌面', 'degrees': [0.]*6}]
+            with mock.patch.object(self.web, 'PROJECT', project), \
+                    mock.patch.object(self.web.controller.homes, 'list', return_value=saved):
+                result = self.web.homes_response()
+                self.assertAlmostEqual(result['default']['model_joints'][0], .3)
+                self.assertAlmostEqual(result['profiles'][0]['model_joints'][0], .1)
+                self.assertEqual(result['profiles'][0]['degrees'], [0.]*6)
 
     def test_origin_and_content_type_guard(self):
         with mock.patch.object(self.web.controller, 'start', return_value={'ok': True}) as start:
@@ -270,6 +284,36 @@ class HttpSecurityTests(unittest.TestCase):
             body = json.dumps({'confirm_home': True, 'speed': 'medium', 'motion': {'gain': 1.9, 'gain_x': 1.9, 'max_vel': .25}}).encode()
             self.assertEqual(self.request('http://127.0.0.1:8765', body=body)[0], 200)
             self.assertEqual(start.call_args.kwargs['motion']['max_vel'], .25)
+
+    def test_gravity_requires_explicit_confirmation_and_local_origin(self):
+        with mock.patch.object(self.web.controller, 'start_gravity', return_value={'ok': True}) as start:
+            self.assertEqual(self.request('https://attacker.example', body=b'{"confirm_workspace":true}',
+                                          path='/api/robot/gravity/start')[0], 403)
+            for value in (None, False, 1, 'true'):
+                body = json.dumps({'confirm_workspace': value}).encode()
+                self.assertEqual(self.request('http://127.0.0.1:8765', body=body,
+                                              path='/api/robot/gravity/start')[0], 400)
+            start.assert_not_called()
+            self.assertEqual(self.request('http://127.0.0.1:8765', body=b'{"confirm_workspace":true}',
+                                          path='/api/robot/gravity/start')[0], 200)
+            start.assert_called_once_with()
+
+    def test_gravity_save_action_rejects_cross_origin(self):
+        with mock.patch.object(self.web.controller, 'save_gravity_home', return_value={'ok': True}) as save:
+            body = b'{"name":"test","replace":false}'
+            self.assertEqual(self.request('https://attacker.example', body=body,
+                                          path='/api/home/gravity-save')[0], 403)
+            save.assert_not_called()
+            self.assertEqual(self.request('http://127.0.0.1:8765', body=body,
+                                          path='/api/home/gravity-save')[0], 200)
+            save.assert_called_once_with('test', False)
+
+    def test_gravity_never_falls_back_to_old_csv_feedback(self):
+        with mock.patch.object(self.web.controller, 'live_telemetry', return_value=None), \
+                mock.patch.object(self.web.controller, 'status', return_value={'process_mode': 'gravity'}), \
+                mock.patch.object(self.web, 'read_latest_state') as fallback:
+            self.assertFalse(self.web.latest_state()['online'])
+            fallback.assert_not_called()
 
     def test_camera_endpoint_returns_only_current_frame(self):
         handler = object.__new__(self.web.Handler)
