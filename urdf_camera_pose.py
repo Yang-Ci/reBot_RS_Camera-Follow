@@ -4,9 +4,10 @@ import xml.etree.ElementTree as ET
 
 import numpy as np
 
-DEFAULT_GEMINI2_URDF = Path('/home/robot/ReBot_Arm_DigitalTwin_RS/reBotArm_simulator-RS/public/models/wrist-cameras/urdf/gemini2.urdf')
+DEFAULT_GEMINI2_URDF = Path(__file__).resolve().parent / 'models/wrist_camera/gemini2_level.urdf'
+DEFAULT_D435I_URDF = Path(__file__).resolve().parent / 'models/wrist_camera/d435i_level.urdf'
 DEFAULT_GEMINI305_URDF = Path(__file__).resolve().parent / 'models/wrist_camera/gemini305_centered.urdf'
-DEFAULT_GEMINI336_URDF = Path(__file__).resolve().parent / 'models/wrist_camera/gemini336.urdf'
+DEFAULT_GEMINI336_URDF = Path(__file__).resolve().parent / 'models/wrist_camera/gemini336_level.urdf'
 
 
 def _origin_matrix(origin):
@@ -51,7 +52,7 @@ def _fixed_chain(root, start, end):
     return result
 
 
-def gemini2_nominal_tcp_camera(arm_urdf, tool_offset, camera_urdf=DEFAULT_GEMINI2_URDF):
+def gemini2_nominal_tcp_camera(arm_urdf, tool_offset, camera_urdf=DEFAULT_GEMINI2_URDF, *, optical_frame="camera_color_optical_frame"):
     """joint6 TCP -> Gemini 2 color optical frame, assuming identical mounting."""
     arm = ET.parse(arm_urdf).getroot()
     camera = ET.parse(camera_urdf).getroot()
@@ -64,7 +65,7 @@ def gemini2_nominal_tcp_camera(arm_urdf, tool_offset, camera_urdf=DEFAULT_GEMINI
     tcp_to_joint6 = np.eye(4)
     tcp_to_joint6[:3, 3] = -offset
     return (tcp_to_joint6 @ _fixed_chain(arm, joint6.find('child').get('link'), 'gripper_end')
-            @ _fixed_chain(camera, 'gripper_end', 'camera_color_optical_frame'))
+            @ _fixed_chain(camera, 'gripper_end', optical_frame))
 
 
 def gemini336_nominal_tcp_camera(arm_urdf, tool_offset, camera_urdf=DEFAULT_GEMINI336_URDF):
@@ -75,3 +76,9 @@ def gemini336_nominal_tcp_camera(arm_urdf, tool_offset, camera_urdf=DEFAULT_GEMI
 def gemini305_nominal_tcp_camera(arm_urdf, tool_offset, camera_urdf=DEFAULT_GEMINI305_URDF):
     """Nominal centered, level mount; verify assembly before any movement."""
     return gemini2_nominal_tcp_camera(arm_urdf, tool_offset, camera_urdf)
+
+
+def d435i_nominal_tcp_camera(arm_urdf, tool_offset, camera_urdf=DEFAULT_D435I_URDF, *, has_color=True):
+    """Use the optical frame of the image stream used for detection."""
+    frame = "camera_color_optical_frame" if has_color else "camera_infra1_optical_frame"
+    return gemini2_nominal_tcp_camera(arm_urdf, tool_offset, camera_urdf, optical_frame=frame)

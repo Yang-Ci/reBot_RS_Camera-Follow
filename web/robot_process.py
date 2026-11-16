@@ -215,10 +215,6 @@ class RobotProcess:
             matched = next((item for item in available if item.get('serial') == serial), None)
             if not matched or (matched.get('model') or ('gemini305' if 'gemini 305' in matched.get('name', '').lower() else 'gemini336')) != camera:
                 raise ValueError('所选设备与相机型号不一致或已离线，请刷新相机列表')
-        if camera in ('gemini2', 'd435i'):
-            calibration = 'hand_eye_calibration.json' if camera == 'gemini2' else 'hand_eye_calibration_d435i.json'
-            if not (self.project / 'config' / calibration).is_file():
-                raise ValueError(f'缺少 {camera} 相机位姿文件 config/{calibration}；请先完成并验证该相机的位姿')
         if motion is not None:
             motion = validate_motion_settings(motion)
         with self.lock:

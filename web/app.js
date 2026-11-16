@@ -35,7 +35,8 @@
     if (!wrist) return;
     const request = ++wristCameraRequest;
     const camLoader = loader(manager);
-    const paths = {gemini305:'/model/gemini305_centered.urdf', gemini336:'/model/gemini336.urdf', gemini2:'/assets/camera/urdf/gemini2.urdf', d435i:'/assets/camera/urdf/d435.urdf'};
+    camLoader.packages = {rebot_mount:'/model', twin_camera:'/assets/camera'};
+    const paths = {gemini305:'/model/gemini305_centered.urdf', gemini336:'/model/gemini336_level.urdf', gemini2:'/model/gemini2_level.urdf', d435i:'/model/d435i_level.urdf'};
     camLoader.load(paths[model], c => {
       if (request !== wristCameraRequest) return;
       if (wristCameraModel) wrist.remove(wristCameraModel);

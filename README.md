@@ -97,7 +97,7 @@ reBot_RS_Camera-Follow/
 
 该平视版支架基于 Seeed 的 V1 模型，将相机固定面从约 15° 下倾调整为名义 0°。支架由 Gemini 2、Gemini 336 和 D435i 共用；相机的实际固定方式、光学方向与视野应在装配后核对。预览图中的视场结果基于 Gemini 2 的 CAD 几何校核，**尚未完成实物试装和相机画面验证**，不能代表其他相机的实测视场。
 
-平视支架是独立提供的打印模型；当前网页及控制使用的 Gemini 336 URDF 仍为原 V1 支架名义位姿，不会自动随平视支架更新。共用安装接口不代表相机位姿相同；换装前需核对变换并按实际安装重新标定，详见[腕部模型说明](models/wrist_camera/README.md)。
+Gemini 2、D435i 和 Gemini 336 共用 V1 平视支架，网页和跟随程序使用各自对应的平视版 URDF；相机光学中心按型号分别设置。模型使用 CAD 名义装配，实际安装应在首次运行前核对，详见[腕部模型说明](models/wrist_camera/README.md)。
 
 ![Gemini 2 V1 平视版支架与视场示意](models/wrist_camera/gemini2-v1-level/Gemini2_V1_Level_preview.png)
 
@@ -141,7 +141,7 @@ git -C vendor/rebot_control checkout a901ec109ad99d7140c9b2110c618f54a9107ae9
 python3 web/server.py
 ```
 
-打开 <http://127.0.0.1:8765>。网页本身可以在不连接机械臂时打开。选择已连接的 Gemini 2、Gemini 305、Gemini 336 或 D435i 并打开相机后，可先检查画面，再选择速度、夹爪模式和参数。选择会同步切换对应相机模型与控制配置。Gemini 2 和 D435i 真机跟随需要与实际安装一致的手眼位姿文件；缺失时网页会阻止初始化。Gemini 305 使用居中平视支架的 CAD 名义位姿，尚未验证真机运动方向。
+打开 <http://127.0.0.1:8765>。网页本身可以在不连接机械臂时打开。选择已连接的 Gemini 2、Gemini 305、Gemini 336 或 D435i 并打开相机后，可先检查画面，再选择速度、夹爪模式和参数。选择会同步切换对应相机模型与控制配置。各相机默认使用对应 URDF 的名义位姿，无需手眼文件；位姿应与实际安装一致，运动方向须先低速核对。Gemini 305 使用居中平视支架的 CAD 名义位姿。
 
 点击“初始化真机”会使能机械臂并移动到 HOME；到位后按 `R`、点击“开始跟随”，或持续张开手掌 3 秒开始。空格暂停；`Q` / `Esc` 请求退出并回零。初始化、退出和回零都可能产生真实运动，紧急情况使用硬件急停。
 
@@ -188,7 +188,7 @@ D435i 使用、手眼标定和更详细的控制说明见[技术手册](docs/技
 | [`tools/analyze_servo_log.py`](tools/analyze_servo_log.py) | 分析伺服诊断日志 |
 | [`tools/run_regression.py`](tools/run_regression.py) | 顺序运行假设备回归 |
 
-Gemini 336 默认使用 URDF 名义位姿，也可选择独立的实测手眼结果；Gemini 2 和 D435i 的真机跟随需要各自的手眼文件，仓库不提供 Gemini 2 的旧标定结果，使用前需重新标定。URDF 名义位姿不能替代实装核对，也不会计算关节零位；`config/joint_offset.json` 继续用于运动学。通用标定工具支持 `--camera gemini2`、`--camera gemini336` 和 `--camera d435i`，`--preview` / `--check` 不连接机械臂，`--run` 会使能并移动机械臂；已有结果不会被覆盖。旧的手眼与关节零位联合标定程序已移除；通用工具只计算相机手眼变换，不重新计算关节零位。新生成的 Gemini 2 结果需在验证后放入其读取的 `config/hand_eye_calibration.json`；已有文件不会被自动替换。
+Gemini 2、D435i、Gemini 305 和 Gemini 336 默认使用各自 URDF 的名义相机位姿，无需手眼标定文件。Gemini 2、D435i 与 Gemini 336 使用对应的 V1 平视版模型；D435i 根据当前彩色或红外图像选择光学坐标。Gemini 336 也可选用独立实测手眼结果。URDF 位姿须与实际支架和相机安装一致；它不计算关节零位，`config/joint_offset.json` 继续用于运动学。通用手眼标定工具是可选诊断工具，`--run` 会使能并移动机械臂；已有结果不会被覆盖。
 
 ```bash
 # 只查看标记画面，不连接机械臂；型号也可选 gemini336 或 d435i

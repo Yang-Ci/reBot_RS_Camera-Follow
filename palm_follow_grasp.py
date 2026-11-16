@@ -63,8 +63,7 @@ from robot_follow.perception.ir_filter import in_ir_gripper_region, ir_gripper_d
 from robot_follow.perception.depth import DepthGate
 from robot_follow.perception.pipeline import HandPipeline
 from robot_follow.hardware.camera import CameraSession
-from robot_follow.perception.calibration import (verify_d435i_calibration,
-    verify_calibration_joint_offset, verify_orbbec_camera)
+from robot_follow.perception.calibration import verify_calibration_joint_offset, verify_orbbec_camera
 from robot_follow.control.guards import (pause_outside_workspace, pause_runtime_workspace,
     apply_stationary_joint_hold)
 from robot_follow.runtime.observation import TargetObservation
@@ -182,7 +181,7 @@ def _run(resources):
         raise ValueError('--gemini2-urdf-pose 不能与 calibration 同时使用')
     use_336_urdf = args.camera == 'gemini336' and args.gemini336_pose == 'urdf'
     use_305_urdf = args.camera == 'gemini305'
-    use_nominal_urdf = use_336_urdf or use_305_urdf
+    use_nominal_urdf = use_336_urdf or use_305_urdf or args.camera in ('gemini2', 'd435i')
     if not np.isfinite(args.home_j34_tolerance) or not 2 <= args.home_j34_tolerance <= 4:
         raise ValueError('--home-j34-tolerance 必须在 2~4° 内')
     if not np.isfinite(args.home_speed) or not 0 < args.home_speed <= 15:
@@ -258,20 +257,19 @@ def _run(resources):
           f"{'[纯视觉演练]' if args.no_arm else ''}"
           f"{'[无窗口]' if args.headless else ''}")
 
-    # ── 手眼标定（仅跟随模式需要）──
+    # ── 相机位姿（仅跟随模式需要）──
     T_tcp_camera = None
     calibration_data = None
-    if follow_enabled and not args.no_arm and use_nominal_urdf:
+    if follow_enabled and not args.no_arm and use_nominal_urdf and args.camera != 'd435i':
         from rebot_adapter import URDF_PATH
-        from urdf_camera_pose import gemini305_nominal_tcp_camera, gemini336_nominal_tcp_camera
-        pose = gemini305_nominal_tcp_camera if use_305_urdf else gemini336_nominal_tcp_camera
+        from urdf_camera_pose import gemini2_nominal_tcp_camera, gemini305_nominal_tcp_camera, gemini336_nominal_tcp_camera
+        pose = {'gemini2': gemini2_nominal_tcp_camera, 'gemini305': gemini305_nominal_tcp_camera,
+                'gemini336': gemini336_nominal_tcp_camera}[args.camera]
         T_tcp_camera = pose(URDF_PATH, runtime_config.tool_offset)
         print(f'[相机位姿] {args.camera} 使用支架 CAD 名义位姿（未实测验证）；请核对实际安装和运动方向', flush=True)
         print(T_tcp_camera, flush=True)
-    elif follow_enabled and not args.no_arm:
-        calib_name = {"d435i": "hand_eye_calibration_d435i.json",
-                      "gemini336": "hand_eye_calibration_gemini336.json",
-                      "gemini2": "hand_eye_calibration.json"}[args.camera]
+    elif follow_enabled and not args.no_arm and not use_nominal_urdf:
+        calib_name = "hand_eye_calibration_gemini336.json"
         calib_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config", calib_name)
         if not os.path.exists(calib_file):
             raise FileNotFoundError(
@@ -295,9 +293,7 @@ def _run(resources):
                                        (args.ir_emitter == "auto" and args.no_arm)
                                        else "on")
     def validate_camera(camera):
-        if args.camera == "d435i":
-            verify_d435i_calibration(camera, calibration_data)
-        else:
+        if args.camera != "d435i":
             verify_orbbec_camera(camera, args.camera, calibration_data,
                                  require_calibration=(follow_enabled and not args.no_arm
                                                       and not use_nominal_urdf))
@@ -305,6 +301,12 @@ def _run(resources):
     camera_session = CameraSession(lambda: Camera(**camera_kwargs), validate_camera)
     resources.camera = camera_session
     cam = camera_session.open()
+    if follow_enabled and not args.no_arm and args.camera == "d435i":
+        from rebot_adapter import URDF_PATH
+        from urdf_camera_pose import d435i_nominal_tcp_camera
+        T_tcp_camera = d435i_nominal_tcp_camera(URDF_PATH, runtime_config.tool_offset, has_color=cam.has_color)
+        print(f"[相机位姿] D435i 使用 URDF 名义位姿（{'彩色' if cam.has_color else '红外'}光学坐标）；请核对实际安装和运动方向", flush=True)
+        print(T_tcp_camera, flush=True)
     fx, fy, cx, cy = cam.fx, cam.fy, cam.cx, cam.cy
 
     def project_pixel(u, v, depth):

@@ -1,6 +1,6 @@
 # B601 本地监视页面
 
-启动：`python3 web/server.py`，打开 <http://127.0.0.1:8765>。不需要启动机械臂即可查看页面。模型资源默认读取 `/home/robot/ReBot_Arm_DigitalTwin_RS/reBotArm_simulator-RS`；迁移后设置 `REBOT_TWIN_PATH` 指向数字孪生项目的 `reBotArm_simulator-RS` 目录。页面使用数字孪生项目的 B601 URDF；腕部相机本体使用 Orbbec 官方 Gemini 335/336 网格和本仓库 `models/wrist_camera/gemini336.urdf`。支架使用 Seeed 的 D435/Gemini 2 V1 模型；底座和相机依据 CAD 安装面作名义对齐，光学位姿尚待实机验证，见 [模型说明](../models/wrist_camera/README.md)。
+启动：`python3 web/server.py`，打开 <http://127.0.0.1:8765>。不需要启动机械臂即可查看页面。模型资源默认读取 `/home/robot/ReBot_Arm_DigitalTwin_RS/reBotArm_simulator-RS`；迁移后设置 `REBOT_TWIN_PATH` 指向数字孪生项目的 `reBotArm_simulator-RS` 目录。页面使用数字孪生项目的 B601 URDF；腕部相机本体使用 Orbbec 官方 Gemini 335/336 网格和本仓库 `models/wrist_camera/gemini336_level.urdf`。支架使用 D435/Gemini 2 V1 平视版模型；底座和相机依据 CAD 安装面作名义对齐，光学位姿尚待实机验证，见 [模型说明](../models/wrist_camera/README.md)。
 
 数字孪生资源来自 [Yang-Ci / ReBot_Arm_DigitalTwin_RS](https://github.com/Yang-Ci/ReBot_Arm_DigitalTwin_RS)。电脑摄像头模拟还需要在该项目的 `reBotArm_simulator-RS` 目录执行 `npm install` 和 `npm run prepare:hand`，生成 `public/lib/mediapipe`；这些运行时资源不包含在本仓库中。
 
@@ -33,7 +33,7 @@ Three.js、STLLoader、URDFLoader 来自本机数字孪生项目，遵循它们�
 
 ### 相机位姿与桌面跟随保护
 
-Gemini 305 和 336 使用各自的 CAD 名义 URDF 位姿；Gemini 2 和 D435i 需要已验证的 `config/hand_eye_calibration.json` 和 `config/hand_eye_calibration_d435i.json`。缺少对应位姿文件时，网页允许预览，但会在启动机械臂前拒绝初始化。仅有共用支架接口并不保证不同相机的光心相同。
+Gemini 2、D435i、Gemini 305 和 336 均默认使用对应 URDF 的名义位姿，无需手眼文件。Gemini 2、D435i 和 336 使用共用支架的平视版 URDF；D435i 按当前彩色或红外图像选取对应光学坐标。Gemini 2、D435i 和 336 共用支架，但相机光心不同；实际安装需与各自 URDF 一致。
 
 桌面端左侧三维视图与相机预览固定在视窗内，右侧控制面板独立滚动。窄屏仍为上下布局。
 

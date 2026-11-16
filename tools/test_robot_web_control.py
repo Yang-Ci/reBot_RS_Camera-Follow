@@ -202,14 +202,9 @@ class RobotProcessTests(unittest.TestCase):
         self.assertEqual(args[args.index('--camera') + 1], 'gemini305')
         self.assertEqual(self.robot.process.kwargs['env']['REBOT_CAMERA_SERIAL'], '305')
 
-    def test_legacy_cameras_require_matching_device_and_pose_before_start(self):
-        for model, filename in [('gemini2', 'hand_eye_calibration.json'), ('d435i', 'hand_eye_calibration_d435i.json')]:
+    def test_cameras_use_selected_device_without_hand_eye_file(self):
+        for model in ('gemini2', 'd435i'):
             with self.subTest(model=model), mock.patch.object(self.robot, 'cameras', return_value=[{'serial': 'chosen', 'model': model}]):
-                with self.assertRaisesRegex(ValueError, '位姿文件'):
-                    self.robot.start(serial='chosen', camera=model)
-                self.assertIsNone(self.robot.process)
-                (self.project / 'config').mkdir(exist_ok=True)
-                (self.project / 'config' / filename).write_text('{}')
                 with self.assertRaises(ValueError):
                     self.robot.start(serial='other', camera=model)
                 self.robot.start(serial='chosen', camera=model)

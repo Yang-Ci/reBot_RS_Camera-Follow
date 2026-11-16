@@ -188,6 +188,7 @@ palm_module.pinch_distance_px = lambda *args, **kwargs: (0.0, (0, 0), (0, 0))
 sys.modules["palm_detection"] = palm_module
 
 adapter_module = types.ModuleType("rebot_adapter")
+adapter_module.URDF_PATH = "fake-arm.urdf"
 adapter_module.RebotAdapter = FakeRobot
 adapter_module.validate_home_recovery = lambda *args, **kwargs: False
 adapter_module.validate_home_target = lambda *args, **kwargs: False
@@ -206,32 +207,10 @@ main_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(main_module)
 main_module.HOME_JOINT_POS = np.zeros(6)
 
-# Use a synthetic identity calibration; the repository contains no device-specific
-# Gemini 2 result. Keep the fixture local to the imported main module.
-import io
+# Provide a synthetic URDF transform without depending on machine-specific assets.
 import json
-import builtins
-
-class FakePath:
-    def __getattr__(self, name):
-        return getattr(os.path, name)
-    def exists(self, path):
-        if str(path).endswith('/config/hand_eye_calibration.json'):
-            return True
-        return os.path.exists(path)
-
-class FakeOS:
-    path = FakePath()
-    def __getattr__(self, name):
-        return getattr(os, name)
-
-def fake_open(path, *args, **kwargs):
-    if str(path).endswith('/config/hand_eye_calibration.json'):
-        return io.StringIO(json.dumps({'T_tcp_camera': np.eye(4).tolist()}))
-    return builtins.open(path, *args, **kwargs)
-
-main_module.os = FakeOS()
-main_module.open = fake_open
+import urdf_camera_pose
+urdf_camera_pose.gemini2_nominal_tcp_camera = lambda *args, **kwargs: np.eye(4)
 
 
 class TrackedFeedbackSampler(main_module.ActualFeedbackSampler):
