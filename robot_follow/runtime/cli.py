@@ -23,8 +23,6 @@ def parse_args(argv=None):
                    help="相机型号：gemini2（默认）、gemini305、gemini336 或 d435i")
     p.add_argument("--gemini2-urdf-pose", action="store_true",
                    help="兼容旧命令：Gemini 336 使用 URDF 名义相机位姿")
-    p.add_argument("--gemini336-pose", choices=["urdf", "calibration"], default="urdf",
-                   help="Gemini 336 相机位姿来源，默认 urdf；可选 calibration 使用独立手眼结果")
     p.add_argument("--home-j34-tolerance", type=float, default=2.0, metavar="DEG",
                    help="普通 HOME 的 J3/J4 实际到位容差，范围 2~4°")
     p.add_argument("--home-speed", type=float, default=15.0, metavar="DEG_S",

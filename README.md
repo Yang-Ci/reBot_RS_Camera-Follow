@@ -188,7 +188,7 @@ D435i 使用、手眼标定和更详细的控制说明见[技术手册](docs/技
 | [`tools/analyze_servo_log.py`](tools/analyze_servo_log.py) | 分析伺服诊断日志 |
 | [`tools/run_regression.py`](tools/run_regression.py) | 顺序运行假设备回归 |
 
-Gemini 2、D435i、Gemini 305 和 Gemini 336 默认使用各自 URDF 的名义相机位姿，无需手眼标定文件。Gemini 2、D435i 与 Gemini 336 使用对应的 V1 平视版模型；D435i 根据当前彩色或红外图像选择光学坐标。Gemini 336 也可选用独立实测手眼结果。URDF 位姿须与实际支架和相机安装一致；它不计算关节零位，`config/joint_offset.json` 继续用于运动学。通用手眼标定工具是可选诊断工具，`--run` 会使能并移动机械臂；已有结果不会被覆盖。
+Gemini 2、D435i、Gemini 305 和 Gemini 336 默认使用各自 URDF 的名义相机位姿，无需手眼标定文件。Gemini 2、D435i 与 Gemini 336 使用对应的 V1 平视版模型；D435i 根据当前彩色或红外图像选择光学坐标。URDF 位姿须与实际支架和相机安装一致；它不计算关节零位，`config/joint_offset.json` 继续用于运动学。通用手眼标定工具是可选诊断工具，`--run` 会使能并移动机械臂；已有结果不会被覆盖。
 
 ```bash
 # 只查看标记画面，不连接机械臂；型号也可选 gemini336 或 d435i
