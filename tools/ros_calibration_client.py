@@ -9,12 +9,14 @@ import time
 import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent
-ROS_ENV = '/home/robot/ReBot_Arm_DigitalTwin_RS/scripts/rs_env.sh'
+ROS_ENV = os.environ.get('REBOT_ROS_ENV')
 
 
 class RosCalibrationArm:
     is_ros_client = True
     def __init__(self):
+        if not ROS_ENV or not Path(ROS_ENV).is_file():
+            raise RuntimeError('ROS 标定模式需要将 REBOT_ROS_ENV 设置为已安装 ROS 工作空间的 setup.bash；普通真机跟随不需要 ROS')
         import pinocchio as pin
         from rebot_adapter import URDF_PATH, B601_RS_JOINT_NAMES, JOINT_LIMIT_MARGIN
         self.model = pin.buildModelFromUrdf(URDF_PATH)

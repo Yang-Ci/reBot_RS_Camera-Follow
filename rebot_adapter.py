@@ -15,13 +15,12 @@ reBot Arm B601-RS 机械臂适配层
   │     用 set_gripper_deg() 设置目标角。与 6 关节共用同一 CAN 主机，
   │     不存在第二个 motorbridge 连接争抢电机 7 的问题。
   │
-  └─ 运动学/动力学：Pinocchio 直接加载 reBotArm_control_py 仓库里的 URDF
+  └─ 运动学/动力学：Pinocchio 直接加载项目内的 RS URDF
         （原项目 Panthera 也是这么做的，FK/雅可比/重力项全部对齐）
 
 依赖：
-    git clone https://github.com/LAN-GER/rebot_control.git
     pip install motorbridge pynput pyyaml pinocchio numpy
-    URDF 来自 https://github.com/Seeed-Projects/reBotArm_control_py 的 urdf/ 目录
+    控制器和 URDF 已包含在本项目中。
 
 ⚠️ 使用前先核对：
     1. 你机器上 rebot_control 的实际类名/方法名（不同版本可能有出入，
@@ -55,7 +54,8 @@ REBOT_CONTROL_PATH = os.path.expanduser(os.environ.get(
                                        "vendor", "rebot_control")))
 
 URDF_PATH = os.path.expanduser(os.environ.get(
-    "REBOT_URDF_PATH", "~/reBotArm_control_py/urdf/RS/urdf/ReBot_Arm_RS.urdf"))
+    "REBOT_URDF_PATH", os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                    "assets", "robot", "description", "urdf", "ReBot_Arm_RS.urdf")))
 
 # B601 RS 的 6 个关节在 URDF 里的名称（按 1→6 顺序，已在 ReBot_Arm_RS.urdf 中核对）
 B601_RS_JOINT_NAMES = ["joint1", "joint2", "joint3",

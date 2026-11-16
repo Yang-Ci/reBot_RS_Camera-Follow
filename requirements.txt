@@ -9,9 +9,7 @@ opencv-contrib-python>=4.8  # 相机采集 / ArUco（标定用）/ 画面绘制
 numpy>=1.24
 PyYAML>=6.0                 # config/grasp.yaml
 pynput>=1.7                 # 键盘监听（启停跟随 / 标定微动）
-pinocchio>=3.0              # 运动学（FK / 雅可比），读 reBotArm_control_py 的 URDF
+pin>=3.0,<4                 # Pinocchio 运动学（导入名 pinocchio）
 scipy>=1.10                 # 标定和运动学计算
 
-# 另外需要两个源码仓库（非 pip 包），路径在 rebot_adapter.py 顶部配置：
-#   git clone https://github.com/LAN-GER/rebot_control.git        # 运动下发
-#   git clone https://github.com/Seeed-Projects/reBotArm_control_py.git  # URDF
+# 控制器源码和 RS URDF 包含在项目内。

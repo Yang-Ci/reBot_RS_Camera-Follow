@@ -18,7 +18,7 @@ from robot_process import RobotProcess, speed_presets, validate_motion_settings
 from telemetry import read_latest_state, state_from_row
 
 controller = RobotProcess(PROJECT)
-TWIN = Path(os.environ.get('REBOT_TWIN_PATH', '/home/robot/ReBot_Arm_DigitalTwin_RS/reBotArm_simulator-RS')).resolve()
+ASSETS = PROJECT / 'assets'
 
 
 def home_preview(degrees):
@@ -79,10 +79,10 @@ def controller_status():
 class Handler(SimpleHTTPRequestHandler):
     def translate_path(self, path):
         path = urlparse(path).path
-        mappings = {'/assets/mediapipe/': TWIN / 'public/lib/mediapipe',
+        mappings = {'/assets/mediapipe/': ROOT / 'lib/mediapipe',
                     '/model/': PROJECT / 'models/wrist_camera',
-                    '/assets/description/': TWIN / 'description',
-                    '/assets/camera/': TWIN / 'public/models/wrist-cameras'}
+                    '/assets/description/': ASSETS / 'robot/description',
+                    '/assets/camera/': ASSETS / 'wrist-cameras'}
         for prefix, root in mappings.items():
             if path.startswith(prefix):
                 target = (root / path[len(prefix):]).resolve()
@@ -221,7 +221,7 @@ class Handler(SimpleHTTPRequestHandler):
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', '8765'))
-    print(f'控制台: http://127.0.0.1:{port}  |  模型来源: {TWIN}', flush=True)
+    print(f'控制台: http://127.0.0.1:{port}  |  模型来源: {ASSETS}', flush=True)
     def cleanup():
         if controller.status()['running']:
             try:

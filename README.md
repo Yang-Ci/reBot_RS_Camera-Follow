@@ -60,6 +60,8 @@ reBot_RS_Camera-Follow/
 │   ├── robot_process.py           # 真机控制进程和相机预览管理
 │   ├── app.js / index.html / style.css
 │   └── README.md                  # 网页使用与数据来源说明
+├── assets/                        # RS 机械臂和腕部相机模型资源
+├── vendor/rebot_control/          # 集成的机械臂控制器
 ├── models/wrist_camera/           # 相机模型、支架和许可证
 │   ├── gemini2-v1-level/          # 平视支架的 STEP、STL、预览与说明
 │   ├── gemini336.urdf             # Gemini 336 腕部模型
@@ -124,14 +126,9 @@ python3.10 -m venv .venv-arm
 .venv-arm/bin/python -m pip install -r requirements.txt
 ```
 
-控制库、URDF 和网页数字孪生资源不包含在 `vendor/` 中，需单独准备：
+机械臂控制库、RS URDF、网页模型和浏览器手部识别资源均包含在本仓库中，无需克隆其他项目或设置资源路径。Python 依赖和相机 SDK 仍需按上面的说明安装。资源来源见 [资源说明](assets/README.md)。
 
-```bash
-git clone https://github.com/LAN-GER/rebot_control.git vendor/rebot_control
-git -C vendor/rebot_control checkout a901ec109ad99d7140c9b2110c618f54a9107ae9
-```
-
-还需获取 [reBotArm_control_py](https://github.com/Seeed-Projects/reBotArm_control_py) 的 RS URDF，以及网页使用的 [ReBot_Arm_DigitalTwin_RS](https://github.com/Yang-Ci/ReBot_Arm_DigitalTwin_RS)。可通过 `REBOT_CONTROL_PATH`、`REBOT_URDF_PATH` 和 `REBOT_TWIN_PATH` 指定本机位置；网页资源配置及电脑摄像头模拟准备见[网页说明](web/README.md)。
+可选的 ROS 标定客户端需要现有 ROS 控制器及其消息接口；使用该模式时，将 `REBOT_ROS_ENV` 指向已配置的 ROS 环境 `setup.bash`。普通跟随和网页功能不依赖 ROS。
 
 仓库内的 HOME、零位和标定数据对应原设备，**不能直接假定适用于另一台机械臂或新的相机安装**。连接真机前，应检查 CAN、关节零位、HOME、手眼标定、夹爪配置和工作空间。
 

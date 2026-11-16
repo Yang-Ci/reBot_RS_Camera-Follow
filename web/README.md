@@ -1,8 +1,8 @@
 # B601 本地监视页面
 
-启动：`python3 web/server.py`，打开 <http://127.0.0.1:8765>。不需要启动机械臂即可查看页面。模型资源默认读取 `/home/robot/ReBot_Arm_DigitalTwin_RS/reBotArm_simulator-RS`；迁移后设置 `REBOT_TWIN_PATH` 指向数字孪生项目的 `reBotArm_simulator-RS` 目录。页面使用数字孪生项目的 B601 URDF；腕部相机本体使用 Orbbec 官方 Gemini 335/336 网格和本仓库 `models/wrist_camera/gemini336_level.urdf`。支架使用 D435/Gemini 2 V1 平视版模型；底座和相机依据 CAD 安装面作名义对齐，光学位姿尚待实机验证，见 [模型说明](../models/wrist_camera/README.md)。
+启动：`python3 web/server.py`，打开 <http://127.0.0.1:8765>。不需要启动机械臂即可查看页面。机械臂 URDF、网格、相机模型和浏览器手部识别资源均包含在项目内；资源来源见 [资源说明](../assets/README.md)。腕部相机与支架的 CAD 名义装配尚未实机验证，见 [模型说明](../models/wrist_camera/README.md)。
 
-数字孪生资源来自 [Yang-Ci / ReBot_Arm_DigitalTwin_RS](https://github.com/Yang-Ci/ReBot_Arm_DigitalTwin_RS)。电脑摄像头模拟还需要在该项目的 `reBotArm_simulator-RS` 目录执行 `npm install` 和 `npm run prepare:hand`，生成 `public/lib/mediapipe`；这些运行时资源不包含在本仓库中。
+电脑摄像头模拟使用项目内的 MediaPipe 网页运行时，无需克隆或安装其他源码仓库。
 
 网页管理的控制程序以目标 20 Hz 向本机网页服务发送状态快照；发送和序列化在后台线程完成，控制线程不会等待网页。网页目标每 0.033 秒读取服务端状态，快照超过 3 秒视为过期。实时通道不可用时回退读取最新 `logs/servo_*.csv`；手动启动的控制程序也可通过日志监视。实时通道不要求开启 CSV 诊断日志。
 
@@ -18,7 +18,7 @@ Three.js、STLLoader、URDFLoader 来自本机数字孪生项目，遵循它们�
 
 打开本地页面后选择“电脑摄像头模拟”，点击“开启摄像头”并允许浏览器访问；授权后可在下拉框选择其他摄像头。把手放入画面，左右、上下移动手掌驱动网页模型，拇指与食指捏合控制虚拟夹爪。“重新定位”以当前手掌和模型位置重新建立相对控制；手掌输入与夹爪开度经过自适应平滑和小幅死区处理，减轻静止抖动；手掌丢失时模型保持，重新检测后不会跳到画面中心。关闭摄像头、切换模式或页面进入后台会停止摄像头。
 
-该模式的关节映射仅为二维网页模拟，不进行真实机械臂控制，也不估计手掌深度或进行末端逆运动学。浏览器需支持 WebAssembly、Worker、摄像头和安全上下文；`localhost` / `127.0.0.1` 可用。手势识别在浏览器本机完成，不上传视频。模型使用项目的 `config/hand_landmarker.task`，MediaPipe 浏览器运行资源沿用 `REBOT_TWIN_PATH` 指向的数字孪生项目。
+该模式的关节映射仅为二维网页模拟，不进行真实机械臂控制，也不估计手掌深度或进行末端逆运动学。浏览器需支持 WebAssembly、Worker、摄像头和安全上下文；`localhost` / `127.0.0.1` 可用。手势识别在浏览器本机完成，不上传视频。模型使用项目的 `config/hand_landmarker.task`，MediaPipe 浏览器运行资源位于项目内 `web/lib/mediapipe/`。
 
 ## 网页真机控制
 

@@ -1,12 +1,11 @@
 """Generate nominal V1 level camera models from the CAD mount transform."""
 from pathlib import Path
-import os
 import xml.etree.ElementTree as ET
 import numpy as np
 from scipy.spatial.transform import Rotation
 
 root=Path(__file__).resolve().parents[1] / 'models/wrist_camera'
-twin=Path(os.environ.get('REBOT_TWIN_PATH', '/home/robot/ReBot_Arm_DigitalTwin_RS/reBotArm_simulator-RS')) / 'public/models/wrist-cameras/urdf'
+twin=Path(__file__).resolve().parents[1] / 'assets/wrist-cameras/urdf'
 def matrix(node):
     origin=node.find('origin'); out=np.eye(4)
     out[:3,:3]=Rotation.from_euler('xyz', [float(x) for x in origin.get('rpy','0 0 0').split()]).as_matrix()

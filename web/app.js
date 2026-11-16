@@ -47,7 +47,7 @@
       wristCameraModel = c; wrist.add(c);
     }, undefined, () => { $('modelStatus').textContent = '相机模型加载失败'; });
   }
-  armLoader.load('/assets/description/urdf/ReBot_Arm_RS.urdf',r=>{robot=r;robotFrame.add(r);showWristCamera(selectedCamera);},undefined,()=>{$('modelStatus').textContent='模型加载失败，请检查数字孪生路径';});
+  armLoader.load('/assets/description/urdf/ReBot_Arm_RS_visual.urdf',r=>{robot=r;robotFrame.add(r);showWristCamera(selectedCamera);},undefined,()=>{$('modelStatus').textContent='模型加载失败，请检查项目资源';});
   let simulationJoints = WebcamControl.middle.slice(), simulationTarget = simulationJoints.slice();
   const motionSmoother = new WebcamControl.MotionSmoother(simulationJoints);
   let grip = .035, gripTarget = .035, renderAt = performance.now();

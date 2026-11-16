@@ -6,7 +6,7 @@
 
 - [Gemini 2 V1 平视版支架](gemini2-v1-level/)可供 Gemini 2、Gemini 336 和 D435i 共用。`gemini2_level.urdf`、`d435i_level.urdf`、`gemini336_level.urdf` 同时用于网页显示和跟随计算，采用相同的支架模型和各相机的光学坐标；D435i 模型的相机外壳以包络盒表示。
 - 平视版的承载部相对于原 V1 绕 CAD X 轴旋转 -14.999820°，旋转中心为 `[0, 40, -11]` mm；URDF 根据 V1 网格的装配平移转换旋转中心。Gemini 2 与 D435i 从数字孪生旧支架位姿转换到 Gemini 336 的 V1 名义装配，再施加该平视变换。此转换基于安装面的名义对齐，并非实测手眼标定；特别是 D435i 实际安装孔位与光心需要实机核对。
-- `gemini336.urdf` 保留作为旧 V1 装配参考，不再是网页或默认跟随使用的模型。平视模型和相机实际安装仍需低速验证，不能保证碰撞安全。 可使用 `tools/build_level_camera_models.py` 和数字孪生源模型重建这三份 URDF；默认路径可通过 `REBOT_TWIN_PATH` 指定。
+- `gemini336.urdf` 保留作为旧 V1 装配参考，不再是网页或默认跟随使用的模型。平视模型和相机实际安装仍需低速验证，不能保证碰撞安全。 可使用 `tools/build_level_camera_models.py` 和项目内 `assets/wrist-cameras/urdf/` 的源模型重建这三份 URDF。
 
 ## Gemini 305 居中平视支架
 

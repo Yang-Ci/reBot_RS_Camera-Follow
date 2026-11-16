@@ -93,7 +93,7 @@ class CameraModelTests(unittest.TestCase):
             np.testing.assert_allclose(point[:3], [old_x / 1000, -.014721, .01252], atol=4e-6)
         # A camera mount follows the new plane, which tilts 15 degrees
         # relative to the original. The optical pose must therefore change.
-        reference = Path('/home/robot/ReBot_Arm_DigitalTwin_RS/reBotArm_simulator-RS/public/models/wrist-cameras/urdf/gemini2.urdf')
+        reference = ROOT / 'assets/wrist-cameras/urdf/gemini2.urdf'
         if reference.exists():
             old = ET.parse(reference).getroot()
             before = _fixed_chain(old, 'gripper_end', 'camera_color_optical_frame')
